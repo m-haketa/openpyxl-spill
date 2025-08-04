@@ -9,6 +9,47 @@ from datetime import timedelta
 from openpyxl.worksheet.formula import DataTableFormula, ArrayFormula
 from openpyxl.cell.rich_text import CellRichText
 
+# Excel 365の新しいスピル関数リスト
+SPILL_FUNCTIONS = {
+    'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
+    'RANDARRAY', 'XLOOKUP', 'XMATCH'
+}
+
+def _prepare_spill_formula(formula_text, cell):
+    """
+    スピル数式を適切な形式に変換する
+    
+    Args:
+        formula_text: 元の数式テキスト（"=UNIQUE(B2:B10)"）
+        cell: Cellオブジェクト
+    
+    Returns:
+        tuple: (処理済み数式, 属性辞書)
+    """
+    if not getattr(cell, "_is_spill", False):
+        return formula_text, {}
+    
+    # =を削除
+    if formula_text and formula_text.startswith('='):
+        formula_text = formula_text[1:]
+    
+    # 関数名を抽出して_xlfn.プレフィックスを追加
+    for func in SPILL_FUNCTIONS:
+        if formula_text.upper().startswith(func):
+            formula_text = '_xlfn.' + formula_text
+            break
+    # SORT関数の特殊ケース
+    if formula_text.startswith('_xlfn.SORT'):
+        formula_text = formula_text.replace('_xlfn.SORT', '_xlfn._xlws.SORT')
+    
+    # 属性を設定
+    attrib = {
+        't': 'array',
+        'ref': getattr(cell, '_spill_range', None) or cell.coordinate
+    }
+    
+    return formula_text, attrib
+
 def _set_attributes(cell, styled=None):
     """
     Set coordinate and datatype
@@ -22,6 +63,10 @@ def _set_attributes(cell, styled=None):
         attrs['t'] = "inlineStr"
     elif cell.data_type != 'f':
         attrs['t'] = cell.data_type
+
+    # スピル数式の場合はcm属性を追加
+    if cell.data_type == "f" and getattr(cell, "_is_spill", False):
+        attrs['cm'] = "1"
 
     value = cell._value
 
@@ -53,18 +98,25 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
 
     if cell.data_type == 'f':
         attrib = {}
-
-        if isinstance(value, ArrayFormula):
+        
+        # スピル数式の処理
+        if getattr(cell, "_is_spill", False):
+            value, spill_attrib = _prepare_spill_formula(value, cell)
+            attrib.update(spill_attrib)
+        elif isinstance(value, ArrayFormula):
             attrib = dict(value)
             value = value.text
-
         elif isinstance(value, DataTableFormula):
             attrib = dict(value)
             value = None
 
         formula = SubElement(el, 'f', attrib)
         if value is not None and not attrib.get('t') == "dataTable":
-            formula.text = value[1:]
+            # スピル数式は既に処理済み、通常の数式は=を削除
+            if not getattr(cell, "_is_spill", False):
+                formula.text = value[1:] if value.startswith('=') else value
+            else:
+                formula.text = value
             value = None
 
     if cell.data_type == 's':
@@ -96,18 +148,25 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
     with xf.element('c', attributes):
         if cell.data_type == 'f':
             attrib = {}
-
-            if isinstance(value, ArrayFormula):
+            
+            # スピル数式の処理
+            if getattr(cell, "_is_spill", False):
+                value, spill_attrib = _prepare_spill_formula(value, cell)
+                attrib.update(spill_attrib)
+            elif isinstance(value, ArrayFormula):
                 attrib = dict(value)
                 value = value.text
-
             elif isinstance(value, DataTableFormula):
                 attrib = dict(value)
                 value = None
 
             with xf.element('f', attrib):
                 if value is not None and not attrib.get('t') == "dataTable":
-                    xf.write(value[1:])
+                    # スピル数式は既に処理済み、通常の数式は=を削除
+                    if not getattr(cell, "_is_spill", False):
+                        xf.write(value[1:] if value.startswith('=') else value)
+                    else:
+                        xf.write(value)
                     value = None
 
         if cell.data_type == 's':

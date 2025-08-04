@@ -685,6 +685,24 @@ class Worksheet(_WorkbookChild):
 
         self._current_row = row_idx
 
+    def set_dynamic_array_formula(self, coordinate, formula, spill_range=None):
+        """
+        指定したセルに動的配列数式を設定します。
+        OpenPyXLの既存のメソッドスタイルに合わせた設計。
+        
+        Args:
+            coordinate: セル座標（例："F2"）
+            formula: 数式（例："=UNIQUE(B2:B10)"）
+            spill_range: スピル範囲（例："F2:F10"）、省略可
+            
+        Returns:
+            Cell: 設定されたセルオブジェクト
+        """
+        cell = self[coordinate]
+        cell.value = formula
+        cell.set_dynamic_array_formula(spill_range)
+        return cell
+
 
     def _move_cells(self, min_row=None, min_col=None, offset=0, row_or_col="row"):
         """

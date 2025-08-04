@@ -52,6 +52,7 @@ class ExcelWriter:
 
     def write_data(self):
         from openpyxl.packaging.extended import ExtendedProperties
+        from openpyxl.packaging.xlmeta import write_metadata
         """Write the various xml files into the zip archive."""
         # cleanup all worksheets
         archive = self._archive
@@ -88,6 +89,9 @@ class ExcelWriter:
         archive.writestr(ARC_ROOT_RELS, writer.write_root_rels())
         archive.writestr(ARC_WORKBOOK, writer.write())
         archive.writestr(ARC_WORKBOOK_RELS, writer.write_rels())
+
+        # 動的配列用メタデータを書き込み
+        archive.writestr('xl/metadata.xml', write_metadata())
 
         self._merge_vba()
 

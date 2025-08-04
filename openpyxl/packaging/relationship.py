@@ -18,6 +18,12 @@ from openpyxl.xml.functions import (
 )
 
 
+# シートメタデータ（動的配列）用リレーションタイプ
+TYPE_SHEET_METADATA = (
+    "http://schemas.openxmlformats.org/"
+    "officeDocument/2006/relationships/sheetMetadata"
+)
+
 class Relationship(Serialisable):
     """Represents many kinds of relationships."""
 

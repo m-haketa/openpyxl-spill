@@ -14,7 +14,7 @@ from openpyxl.xml.constants import (
 )
 from openpyxl.xml.functions import tostring, fromstring
 
-from openpyxl.packaging.relationship import Relationship, RelationshipList
+from openpyxl.packaging.relationship import Relationship, RelationshipList, TYPE_SHEET_METADATA
 from openpyxl.workbook.defined_name import (
     DefinedName,
     DefinedNameList,
@@ -161,6 +161,10 @@ class WorkbookWriter:
 
         theme =  Relationship(type='theme', Target='theme/theme1.xml')
         self.rels.append(theme)
+
+        # 動的配列用メタデータリレーション
+        metadata = Relationship(Type=TYPE_SHEET_METADATA, Target='metadata.xml')
+        self.rels.append(metadata)
 
         if self.wb.vba_archive:
             vba =  Relationship(type='', Target='vbaProject.bin')

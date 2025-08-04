@@ -103,6 +103,8 @@ class Cell(StyleableObject):
         'parent',
         '_hyperlink',
         '_comment',
+        '_is_spill',
+        '_spill_range',
                  )
 
     def __init__(self, worksheet, row=None, column=None, value=None, style_array=None):
@@ -118,6 +120,8 @@ class Cell(StyleableObject):
         if value is not None:
             self.value = value
         self._comment = None
+        self._is_spill = False  # スピル数式フラグ
+        self._spill_range = None  # スピル範囲  # スピル数式フラグ
 
 
     @property
@@ -295,6 +299,28 @@ class Cell(StyleableObject):
         elif value is None and self._comment:
             self._comment.unbind()
         self._comment = value
+
+    def set_dynamic_array_formula(self, range_str=None):
+        """
+        セルを動的配列（スピル）数式としてマークします。
+        従来の配列数式（array_formula）と区別するため、
+        dynamic_arrayを明示的に含む命名。
+        
+        Args:
+            range_str: スピル範囲（例："F2:F10"）。Noneの場合は自動
+        """
+        self._is_spill = True
+        self._spill_range = range_str
+
+    @property
+    def is_dynamic_array(self):
+        """動的配列数式かどうかを返す（読み取り専用）"""
+        return getattr(self, '_is_spill', False)
+    
+    @property
+    def spill_range(self):
+        """スピル範囲を返す（読み取り専用）"""
+        return getattr(self, '_spill_range', None)
 
 
 class MergedCell(StyleableObject):
