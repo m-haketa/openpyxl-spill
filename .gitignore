@@ -1,1 +1,64 @@
-__pycache__
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Build and distribution
+build/
+dist/
+openpyxl.egg-info/
+*.egg
+.eggs/
+sdist/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.ve/
+*.pstats
+cover/
+
+# Virtual environments
+openpyxl-env/
+bin/
+Include/
+Lib/
+Scripts/
+lib/
+pyvenv.cfg
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.orig
+org.eclipse*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+doc/api/
+doc/_build/
+
+# Development
+scratchpad/
+Issues/
+downloads/
+Compliance/
+Spec/
+
+# C extensions (from Cython)
+*.c
+
+# Other
+.noseids
+*.sh
+travis.yml

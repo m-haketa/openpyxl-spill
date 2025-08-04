@@ -1,3 +1,27 @@
+================================
+openpyxl with SPILL Function Support
+================================
+
+**Important**: This is a modified version of openpyxl that includes support for Excel SPILL functions and dynamic arrays.
+
+New Features
+------------
+* Full support for SPILL formulas (SORT, FILTER, UNIQUE, SEQUENCE, etc.)
+* Preserves dynamic array formulas when reading and writing Excel files
+* Compatible with Excel 365 and Excel 2021
+* Maintains backward compatibility with standard openpyxl functionality
+
+Quick Installation
+------------------
+Install directly from GitHub::
+
+    pip install git+https://github.com/[YOUR_USERNAME]/openpyxl-spill.git
+
+---
+
+Original openpyxl Documentation Below
+--------------------------------------
+
 .. image:: https://coveralls.io/repos/bitbucket/openpyxl/openpyxl/badge.svg?branch=default
     :target: https://coveralls.io/bitbucket/openpyxl/openpyxl?branch=default
     :alt: coverage status
