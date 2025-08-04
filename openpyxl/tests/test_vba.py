@@ -56,6 +56,7 @@ def test_save_with_vba(datadir):
                     'xl/media/image1.emf',
                     'xl/activeX/_rels/activeX1.xml.rels',
                     'xl/activeX/activeX2.xml',
+                    'xl/metadata.xml',  # Added for SPILL/dynamic array support
                     ])
     assert files == expected
 
@@ -79,7 +80,8 @@ def test_save_with_saved_comments(datadir):
         'xl/worksheets/_rels/sheet1.xml.rels',
         '_rels/.rels',
         'xl/workbook.xml',
-        'xl/theme/theme1.xml'
+        'xl/theme/theme1.xml',
+        'xl/metadata.xml',  # Added for SPILL/dynamic array support
     ])
     assert files == expected
 

@@ -159,6 +159,7 @@ def test_write_workbook(datadir, tmpdir):
     src.close()
     # remove files from archive that the other can't have
     out_files.discard("xl/sharedStrings.xml")
+    out_files.discard("xl/metadata.xml")  # Added for SPILL/dynamic array support
     orig_files.discard("xl/calcChain.xml")
 
     assert orig_files == out_files
