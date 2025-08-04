@@ -38,9 +38,11 @@ def _prepare_spill_formula(formula_text, cell):
         if formula_text.upper().startswith(func):
             formula_text = '_xlfn.' + formula_text
             break
-    # SORT関数の特殊ケース
+    # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
     if formula_text.startswith('_xlfn.SORT'):
         formula_text = formula_text.replace('_xlfn.SORT', '_xlfn._xlws.SORT')
+    elif formula_text.startswith('_xlfn.FILTER'):
+        formula_text = formula_text.replace('_xlfn.FILTER', '_xlfn._xlws.FILTER')
     
     # 属性を設定
     attrib = {
@@ -100,6 +102,7 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
         attrib = {}
         
         # スピル数式の処理
+        original_value = value
         if getattr(cell, "_is_spill", False):
             value, spill_attrib = _prepare_spill_formula(value, cell)
             attrib.update(spill_attrib)
@@ -117,7 +120,11 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
                 formula.text = value[1:] if value.startswith('=') else value
             else:
                 formula.text = value
-            value = None
+            # スピル数式の場合、v要素に初期値を設定（配列の最初の要素のインデックス）
+            if getattr(cell, "_is_spill", False):
+                value = "0"  # Excelはスピル数式の初期値として0または計算結果を期待
+            else:
+                value = None
 
     if cell.data_type == 's':
         if isinstance(value, CellRichText):
@@ -150,6 +157,7 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
             attrib = {}
             
             # スピル数式の処理
+            original_value = value
             if getattr(cell, "_is_spill", False):
                 value, spill_attrib = _prepare_spill_formula(value, cell)
                 attrib.update(spill_attrib)
@@ -167,7 +175,11 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
                         xf.write(value[1:] if value.startswith('=') else value)
                     else:
                         xf.write(value)
-                    value = None
+                    # スピル数式の場合、v要素に初期値を設定
+                    if getattr(cell, "_is_spill", False):
+                        value = "0"  # Excelはスピル数式の初期値として0または計算結果を期待
+                    else:
+                        value = None
 
         if cell.data_type == 's':
             if isinstance(value, CellRichText):

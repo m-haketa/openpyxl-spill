@@ -92,6 +92,14 @@ class ExcelWriter:
 
         # 動的配列用メタデータを書き込み
         archive.writestr('xl/metadata.xml', write_metadata())
+        
+        # メタデータをmanifestに追加
+        class MetadataOverride():
+            path = "/xl/metadata.xml"
+            mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"
+        
+        metadata_override = MetadataOverride()
+        self.manifest.append(metadata_override)
 
         self._merge_vba()
 
