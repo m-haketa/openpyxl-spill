@@ -12,7 +12,11 @@ from openpyxl.cell.rich_text import CellRichText
 # Excel 365の新しいスピル関数リスト
 SPILL_FUNCTIONS = {
     'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
-    'RANDARRAY', 'XLOOKUP', 'XMATCH'
+    'RANDARRAY', 'XLOOKUP', 'XMATCH',
+    # フェーズ1: 基本的な配列操作関数（LETは別途対応予定）
+    'VSTACK', 'HSTACK', 'TAKE', 'DROP',
+    'CHOOSEROWS', 'CHOOSECOLS', 'EXPAND', 'TOCOL', 'TOROW',
+    'WRAPCOLS', 'WRAPROWS'
 }
 
 def _prepare_spill_formula(formula_text, cell):
