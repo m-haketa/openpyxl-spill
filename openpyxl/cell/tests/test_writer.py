@@ -348,12 +348,268 @@ def test_mixed_spill_formulas(worksheet, write_cell_implementation):
     with xmlfile(out) as xf:
         write_cell(xf, ws, cell)
     
-    # Since _is_spill is False, no special processing should occur
+    # _is_spill is False but UNIQUE still gets _xlfn prefix
     expected = """
     <c r="G2">
-      <f>SUM(UNIQUE(B2:B8))</f>
+      <f>SUM(_xlfn.UNIQUE(B2:B8))</f>
       <v/>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)
     assert diff is None, diff
+
+
+def test_phase1_array_functions(worksheet, write_cell_implementation):
+    """Test Phase 1 array manipulation functions with proper _xlfn prefix"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # テストケース: (セル, 数式, スピル範囲, 期待されるXML)
+    test_cases = [
+        # VSTACK
+        ("A1", '=VSTACK(A2:B3,A5:B6)', 'A1:B4', """
+    <c r="A1" cm="1">
+      <f t="array" ref="A1:B4">_xlfn.VSTACK(A2:B3,A5:B6)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # HSTACK
+        ("B1", '=HSTACK(A1:A3,B1:B3)', 'B1:C3', """
+    <c r="B1" cm="1">
+      <f t="array" ref="B1:C3">_xlfn.HSTACK(A1:A3,B1:B3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TAKE
+        ("C1", '=TAKE(A1:C5,3)', 'C1:E3', """
+    <c r="C1" cm="1">
+      <f t="array" ref="C1:E3">_xlfn.TAKE(A1:C5,3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # DROP
+        ("D1", '=DROP(A1:C5,1)', 'D1:F4', """
+    <c r="D1" cm="1">
+      <f t="array" ref="D1:F4">_xlfn.DROP(A1:C5,1)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # CHOOSEROWS
+        ("E1", '=CHOOSEROWS(A1:C5,1,3)', 'E1:G2', """
+    <c r="E1" cm="1">
+      <f t="array" ref="E1:G2">_xlfn.CHOOSEROWS(A1:C5,1,3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # CHOOSECOLS
+        ("F1", '=CHOOSECOLS(A1:C5,1,3)', 'F1:G5', """
+    <c r="F1" cm="1">
+      <f t="array" ref="F1:G5">_xlfn.CHOOSECOLS(A1:C5,1,3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # EXPAND
+        ("G1", '=EXPAND(A1:B3,5,4,"N/A")', 'G1:J5', """
+    <c r="G1" cm="1">
+      <f t="array" ref="G1:J5">_xlfn.EXPAND(A1:B3,5,4,"N/A")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TOCOL
+        ("H1", '=TOCOL(A1:C3)', 'H1:H9', """
+    <c r="H1" cm="1">
+      <f t="array" ref="H1:H9">_xlfn.TOCOL(A1:C3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TOROW
+        ("I1", '=TOROW(A1:B4)', 'I1:P1', """
+    <c r="I1" cm="1">
+      <f t="array" ref="I1:P1">_xlfn.TOROW(A1:B4)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # WRAPCOLS
+        ("J1", '=WRAPCOLS(SEQUENCE(10),3)', 'J1:L4', """
+    <c r="J1" cm="1">
+      <f t="array" ref="J1:L4">_xlfn.WRAPCOLS(_xlfn.SEQUENCE(10),3)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # WRAPROWS
+        ("K1", '=WRAPROWS(SEQUENCE(10),3)', 'K1:N3', """
+    <c r="K1" cm="1">
+      <f t="array" ref="K1:N3">_xlfn.WRAPROWS(_xlfn.SEQUENCE(10),3)</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
+
+def test_phase2_text_functions(worksheet, write_cell_implementation):
+    """Test Phase 2 text processing functions with proper _xlfn prefix"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # テストケース: (セル, 数式, スピル範囲, 期待されるXML)
+    test_cases = [
+        # ARRAYTOTEXT
+        ("A1", '=ARRAYTOTEXT(A2:B6)', 'A1', """
+    <c r="A1" cm="1">
+      <f t="array" ref="A1">_xlfn.ARRAYTOTEXT(A2:B6)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # VALUETOTEXT
+        ("B1", '=VALUETOTEXT(D2)', 'B1', """
+    <c r="B1" cm="1">
+      <f t="array" ref="B1">_xlfn.VALUETOTEXT(D2)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TEXTAFTER
+        ("C1", '=TEXTAFTER(B2:B6,"@")', 'C1:C5', """
+    <c r="C1" cm="1">
+      <f t="array" ref="C1:C5">_xlfn.TEXTAFTER(B2:B6,"@")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TEXTBEFORE
+        ("D1", '=TEXTBEFORE(B2:B6,"@")', 'D1:D5', """
+    <c r="D1" cm="1">
+      <f t="array" ref="D1:D5">_xlfn.TEXTBEFORE(B2:B6,"@")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # TEXTSPLIT
+        ("E1", '=TEXTSPLIT(C2,"-")', 'E1:G1', """
+    <c r="E1" cm="1">
+      <f t="array" ref="E1:G1">_xlfn.TEXTSPLIT(C2,"-")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # REGEXEXTRACT
+        ("F1", '=REGEXEXTRACT(C2:C6,"\d+")', 'F1:F5', """
+    <c r="F1" cm="1">
+      <f t="array" ref="F1:F5">_xlfn.REGEXEXTRACT(C2:C6,"\d+")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # REGEXREPLACE
+        ("G1", '=REGEXREPLACE(B2:B6,"@.*","@company.com")', 'G1:G5', """
+    <c r="G1" cm="1">
+      <f t="array" ref="G1:G5">_xlfn.REGEXREPLACE(B2:B6,"@.*","@company.com")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # REGEXTEST
+        ("H1", '=REGEXTEST(B2:B6,"\.com$")', 'H1:H5', """
+    <c r="H1" cm="1">
+      <f t="array" ref="H1:H5">_xlfn.REGEXTEST(B2:B6,"\.com$")</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
+
+def test_new_functions_without_spill_array(worksheet, write_cell_implementation):
+    """Test new functions in normal formulas (not spilling) also get _xlfn prefix"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # テストケース: (セル, 数式, 期待されるXML) - スピルなし
+    test_cases = [
+        # Phase 1 functions
+        ("A1", '=VSTACK(A2:A3,B2:B3)', """
+    <c r="A1">
+      <f>_xlfn.VSTACK(A2:A3,B2:B3)</f>
+      <v/>
+    </c>"""),
+        
+        ("B1", '=HSTACK(A1,B1)', """
+    <c r="B1">
+      <f>_xlfn.HSTACK(A1,B1)</f>
+      <v/>
+    </c>"""),
+        
+        ("C1", '=TAKE(A1:C5,1)', """
+    <c r="C1">
+      <f>_xlfn.TAKE(A1:C5,1)</f>
+      <v/>
+    </c>"""),
+        
+        # Phase 2 functions
+        ("D1", '=ARRAYTOTEXT(A1:B2)', """
+    <c r="D1">
+      <f>_xlfn.ARRAYTOTEXT(A1:B2)</f>
+      <v/>
+    </c>"""),
+        
+        ("E1", '=TEXTBEFORE(A1,"@")', """
+    <c r="E1">
+      <f>_xlfn.TEXTBEFORE(A1,"@")</f>
+      <v/>
+    </c>"""),
+        
+        ("F1", '=REGEXTEST(A1,"test")', """
+    <c r="F1">
+      <f>_xlfn.REGEXTEST(A1,"test")</f>
+      <v/>
+    </c>"""),
+        
+        # 既存のスピル関数
+        ("G1", '=UNIQUE(B1:B10)', """
+    <c r="G1">
+      <f>_xlfn.UNIQUE(B1:B10)</f>
+      <v/>
+    </c>"""),
+        
+        ("H1", '=SORT(A1:A10)', """
+    <c r="H1">
+      <f>_xlfn._xlws.SORT(A1:A10)</f>
+      <v/>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        # _is_spillは設定しない（通常の数式）
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
