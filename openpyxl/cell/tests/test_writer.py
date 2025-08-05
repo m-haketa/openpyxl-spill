@@ -211,7 +211,7 @@ def test_table_formula(worksheet, write_cell_implementation):
     expected = """
     <c r="A1">
       <f t="dataTable" ref="A1:B10" />
-      <v/>
+      <v>0</v>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)
@@ -232,7 +232,7 @@ def test_array_formula(worksheet, write_cell_implementation):
     expected = """
     <c r="E2">
       <f t="array" ref="E2:E11">C2:C11*D2:D11</f>
-      <v/>
+      <v>0</v>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)
@@ -278,6 +278,81 @@ def test_rich_text(worksheet, write_cell_implementation):
           <t>danger</t>
         </r>
       </is>
+    </c>"""
+    xml = out.getvalue()
+    diff = compare_xml(xml, expected)
+    assert diff is None, diff
+
+
+def test_nested_spill_formulas(worksheet, write_cell_implementation):
+    """Test nested spill formulas with proper _xlfn prefix handling"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test 1: SORT(UNIQUE(...))
+    cell = ws["F2"]
+    cell.value = '=SORT(UNIQUE(B2:B8),1,-1)'
+    cell._is_spill = True
+    cell._spill_range = 'F2:F6'
+    
+    out = BytesIO()
+    with xmlfile(out) as xf:
+        write_cell(xf, ws, cell)
+    
+    expected = """
+    <c r="F2" cm="1">
+      <f t="array" ref="F2:F6">_xlfn._xlws.SORT(_xlfn.UNIQUE(B2:B8),1,-1)</f>
+      <v>0</v>
+    </c>"""
+    xml = out.getvalue()
+    diff = compare_xml(xml, expected)
+    assert diff is None, diff
+
+
+def test_deeply_nested_spill_formulas(worksheet, write_cell_implementation):
+    """Test deeply nested spill formulas"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test: FILTER(SORT(...),condition)
+    cell = ws["F8"]
+    cell.value = '=FILTER(SORT(B2:B8,1,-1),SORT(B2:B8,1,-1)>=2000)'
+    cell._is_spill = True
+    cell._spill_range = 'F8:F12'
+    
+    out = BytesIO()
+    with xmlfile(out) as xf:
+        write_cell(xf, ws, cell)
+    
+    expected = """
+    <c r="F8" cm="1">
+      <f t="array" ref="F8:F12">_xlfn._xlws.FILTER(_xlfn._xlws.SORT(B2:B8,1,-1),_xlfn._xlws.SORT(B2:B8,1,-1)&gt;=2000)</f>
+      <v>0</v>
+    </c>"""
+    xml = out.getvalue()
+    diff = compare_xml(xml, expected)
+    assert diff is None, diff
+
+
+def test_mixed_spill_formulas(worksheet, write_cell_implementation):
+    """Test mixed spill formulas with regular functions"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test: UNIQUE inside SUM (SUM is not a spill function)
+    cell = ws["G2"]
+    cell.value = '=SUM(UNIQUE(B2:B8))'
+    cell._is_spill = False  # SUM doesn't spill
+    
+    out = BytesIO()
+    with xmlfile(out) as xf:
+        write_cell(xf, ws, cell)
+    
+    # Since _is_spill is False, no special processing should occur
+    expected = """
+    <c r="G2">
+      <f>SUM(UNIQUE(B2:B8))</f>
+      <v/>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)

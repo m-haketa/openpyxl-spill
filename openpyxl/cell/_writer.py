@@ -33,16 +33,20 @@ def _prepare_spill_formula(formula_text, cell):
     if formula_text and formula_text.startswith('='):
         formula_text = formula_text[1:]
     
-    # 関数名を抽出して_xlfn.プレフィックスを追加
+    # 入れ子の数式にも対応するため、すべてのスピル関数にプレフィックスを追加
+    import re
+    
+    # 関数名の前に_xlfn.プレフィックスを追加（既に追加されていない場合）
     for func in SPILL_FUNCTIONS:
-        if formula_text.upper().startswith(func):
-            formula_text = '_xlfn.' + formula_text
-            break
+        # 単語境界を使って関数名を正確にマッチング
+        pattern = r'\b' + func + r'\b'
+        # _xlfn.が既に付いていない場合のみ追加
+        if not re.search(r'_xlfn\.' + func, formula_text):
+            formula_text = re.sub(pattern, '_xlfn.' + func, formula_text)
+    
     # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
-    if formula_text.startswith('_xlfn.SORT'):
-        formula_text = formula_text.replace('_xlfn.SORT', '_xlfn._xlws.SORT')
-    elif formula_text.startswith('_xlfn.FILTER'):
-        formula_text = formula_text.replace('_xlfn.FILTER', '_xlfn._xlws.FILTER')
+    formula_text = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_text)
+    formula_text = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_text)
     
     # 属性を設定
     attrib = {
