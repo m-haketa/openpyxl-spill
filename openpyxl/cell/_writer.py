@@ -9,14 +9,17 @@ from datetime import timedelta
 from openpyxl.worksheet.formula import DataTableFormula, ArrayFormula
 from openpyxl.cell.rich_text import CellRichText
 
-# Excel 365の新しいスピル関数リスト
-SPILL_FUNCTIONS = {
+# Excel 365以降の新関数（_xlfn.プレフィックスが必要）
+EXCEL_NEW_FUNCTIONS = {
     'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
     'RANDARRAY', 'XLOOKUP', 'XMATCH',
     # フェーズ1: 基本的な配列操作関数（LETは別途対応予定）
     'VSTACK', 'HSTACK', 'TAKE', 'DROP',
     'CHOOSEROWS', 'CHOOSECOLS', 'EXPAND', 'TOCOL', 'TOROW',
-    'WRAPCOLS', 'WRAPROWS'
+    'WRAPCOLS', 'WRAPROWS',
+    # フェーズ2: テキスト処理・正規表現関数
+    'ARRAYTOTEXT', 'VALUETOTEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTSPLIT',
+    'REGEXEXTRACT', 'REGEXREPLACE', 'REGEXTEST'
 }
 
 def _prepare_spill_formula(formula_text, cell):
@@ -33,24 +36,12 @@ def _prepare_spill_formula(formula_text, cell):
     if not getattr(cell, "_is_spill", False):
         return formula_text, {}
     
-    # =を削除
+    # 新関数にプレフィックスを追加（共通処理を使用）
+    formula_text = _add_function_prefix(formula_text)
+    
+    # =を削除（既に削除されている場合もある）
     if formula_text and formula_text.startswith('='):
         formula_text = formula_text[1:]
-    
-    # 入れ子の数式にも対応するため、すべてのスピル関数にプレフィックスを追加
-    import re
-    
-    # 関数名の前に_xlfn.プレフィックスを追加（既に追加されていない場合）
-    for func in SPILL_FUNCTIONS:
-        # 単語境界を使って関数名を正確にマッチング
-        pattern = r'\b' + func + r'\b'
-        # _xlfn.が既に付いていない場合のみ追加
-        if not re.search(r'_xlfn\.' + func, formula_text):
-            formula_text = re.sub(pattern, '_xlfn.' + func, formula_text)
-    
-    # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
-    formula_text = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_text)
-    formula_text = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_text)
     
     # 属性を設定
     attrib = {
@@ -59,6 +50,37 @@ def _prepare_spill_formula(formula_text, cell):
     }
     
     return formula_text, attrib
+
+def _add_function_prefix(formula_text):
+    """
+    通常の数式内の新関数に_xlfn.プレフィックスを追加する
+    
+    Args:
+        formula_text: 数式テキスト（"=UPPER(TEXTBEFORE(B2,"@"))"）
+    
+    Returns:
+        str: プレフィックスが追加された数式
+    """
+    if not formula_text or not formula_text.startswith('='):
+        return formula_text
+    
+    # =を一時的に削除
+    formula_without_eq = formula_text[1:]
+    
+    # 新関数にプレフィックスを追加
+    import re
+    for func in EXCEL_NEW_FUNCTIONS:
+        # 単語境界を使って関数名を正確にマッチング
+        pattern = r'\b' + func + r'\b'
+        # _xlfn.が既に付いていない場合のみ追加
+        if not re.search(r'_xlfn\.' + func, formula_without_eq):
+            formula_without_eq = re.sub(pattern, '_xlfn.' + func, formula_without_eq)
+    
+    # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
+    formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
+    formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
+    
+    return '=' + formula_without_eq
 
 def _set_attributes(cell, styled=None):
     """
@@ -125,6 +147,8 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
         if value is not None and not attrib.get('t') == "dataTable":
             # スピル数式は既に処理済み、通常の数式は=を削除
             if not getattr(cell, "_is_spill", False):
+                # 通常の数式でも新関数にプレフィックスを追加
+                value = _add_function_prefix(value)
                 formula.text = value[1:] if value.startswith('=') else value
             else:
                 formula.text = value
@@ -180,6 +204,8 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
                 if value is not None and not attrib.get('t') == "dataTable":
                     # スピル数式は既に処理済み、通常の数式は=を削除
                     if not getattr(cell, "_is_spill", False):
+                        # 通常の数式でも新関数にプレフィックスを追加
+                        value = _add_function_prefix(value)
                         xf.write(value[1:] if value.startswith('=') else value)
                     else:
                         xf.write(value)
