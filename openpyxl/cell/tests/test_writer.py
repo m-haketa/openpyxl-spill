@@ -613,3 +613,180 @@ def test_new_functions_without_spill_array(worksheet, write_cell_implementation)
         diff = compare_xml(xml, expected)
         assert diff is None, f"Failed for {formula}: {diff}"
 
+def test_phase3_normal_array_spill(worksheet, write_cell_implementation):
+    """Test Phase 3: Normal array formulas that spill
+    
+    Tests regular formulas like A1:A5+B1:B5 that produce array results
+    """
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test cases for normal array operations
+    test_cases = [
+        # 基本的な配列演算
+        ("C2", '=A2:A6+B2:B6', 'C2:C6', """
+    <c r="C2" cm="1">
+      <f t="array" ref="C2:C6">A2:A6+B2:B6</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 配列の減算
+        ("D2", '=B2:B6-A2:A6', 'D2:D6', """
+    <c r="D2" cm="1">
+      <f t="array" ref="D2:D6">B2:B6-A2:A6</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 配列の乗算
+        ("E2", '=A2:A6*2', 'E2:E6', """
+    <c r="E2" cm="1">
+      <f t="array" ref="E2:E6">A2:A6*2</f>
+      <v>0</v>
+    </c>"""),
+        
+        # IF関数での配列処理
+        ("F2", '=IF(A2:A6>3,B2:B6,10)', 'F2:F6', """
+    <c r="F2" cm="1">
+      <f t="array" ref="F2:F6">IF(A2:A6&gt;3,B2:B6,10)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 配列同士の比較
+        ("G2", '=IF(A2:A6=B2:B6/10,"一致","不一致")', 'G2:G6', """
+    <c r="G2" cm="1">
+      <f t="array" ref="G2:G6">IF(A2:A6=B2:B6/10,"一致","不一致")</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 複数列の配列演算
+        ("H2", '=A2:B6*2', 'H2:I6', """
+    <c r="H2" cm="1">
+      <f t="array" ref="H2:I6">A2:B6*2</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 既存関数での配列処理
+        ("L2", '=UPPER(K2:K6)', 'L2:L6', """
+    <c r="L2" cm="1">
+      <f t="array" ref="L2:L6">UPPER(K2:K6)</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
+
+def test_phase3_spill_with_new_functions(worksheet, write_cell_implementation):
+    """Test Phase 3: Normal operations combined with new spill functions
+    
+    Tests combinations like UNIQUE(A1:A10)*2 or SORT(A1:A5*B1:B5)
+    """
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test cases combining normal operations with spill functions
+    test_cases = [
+        # スピル関数を含む通常の配列演算
+        ("M2", '=UNIQUE(A2:A11)*2', 'M2:M11', """
+    <c r="M2" cm="1">
+      <f t="array" ref="M2:M11">_xlfn.UNIQUE(A2:A11)*2</f>
+      <v>0</v>
+    </c>"""),
+        
+        # 通常の配列演算をスピル関数に渡す
+        ("N2", '=SORT(A2:A6*B2:B6)', 'N2:N6', """
+    <c r="N2" cm="1">
+      <f t="array" ref="N2:N6">_xlfn._xlws.SORT(A2:A6*B2:B6)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # IF関数とスピル関数の組み合わせ
+        ("O2", '=IF(UNIQUE(A2:A6)>2,UNIQUE(B2:B6),0)', 'O2:O6', """
+    <c r="O2" cm="1">
+      <f t="array" ref="O2:O6">IF(_xlfn.UNIQUE(A2:A6)&gt;2,_xlfn.UNIQUE(B2:B6),0)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # FILTER関数と通常の配列演算
+        ("P2", '=FILTER(A2:A10*2,A2:A10>5)', 'P2:P6', """
+    <c r="P2" cm="1">
+      <f t="array" ref="P2:P6">_xlfn._xlws.FILTER(A2:A10*2,A2:A10&gt;5)</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
+
+def test_phase3_non_spill_formulas(worksheet, write_cell_implementation):
+    """Test Phase 3: Regular formulas that don't spill
+    
+    Tests that normal SUM and single cell references don't generate array formulas
+    """
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    # Test cases for non-spilling formulas
+    test_cases = [
+        # 通常のSUM関数（スピルしない）
+        ("P2", '=SUM(A2:A6)', """
+    <c r="P2">
+      <f>SUM(A2:A6)</f>
+      <v/>
+    </c>"""),
+        
+        # 単一セル参照（スピルしない）
+        ("Q2", '=A2*2', """
+    <c r="Q2">
+      <f>A2*2</f>
+      <v/>
+    </c>"""),
+        
+        # AVERAGEも通常はスピルしない
+        ("R2", '=AVERAGE(A2:A6)', """
+    <c r="R2">
+      <f>AVERAGE(A2:A6)</f>
+      <v/>
+    </c>"""),
+    ]
+    
+    # 各テストケースを実行
+    for cell_ref, formula, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        # _is_spillは設定しない（通常の数式）
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for {formula}: {diff}"
+
