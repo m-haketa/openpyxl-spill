@@ -8,19 +8,9 @@ from datetime import timedelta
 
 from openpyxl.worksheet.formula import DataTableFormula, ArrayFormula
 from openpyxl.cell.rich_text import CellRichText
+from .formula_prefix import add_function_prefix as _add_function_prefix, EXCEL_NEW_FUNCTIONS
 
-# Excel 365以降の新関数（_xlfn.プレフィックスが必要）
-EXCEL_NEW_FUNCTIONS = {
-    'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
-    'RANDARRAY', 'XLOOKUP', 'XMATCH',
-    # フェーズ1: 基本的な配列操作関数（LETは別途対応予定）
-    'VSTACK', 'HSTACK', 'TAKE', 'DROP',
-    'CHOOSEROWS', 'CHOOSECOLS', 'EXPAND', 'TOCOL', 'TOROW',
-    'WRAPCOLS', 'WRAPROWS',
-    # フェーズ2: テキスト処理・正規表現関数
-    'ARRAYTOTEXT', 'VALUETOTEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTSPLIT',
-    'REGEXEXTRACT', 'REGEXREPLACE', 'REGEXTEST'
-}
+
 
 def _prepare_spill_formula(formula_text, cell):
     """
@@ -50,37 +40,6 @@ def _prepare_spill_formula(formula_text, cell):
     }
     
     return formula_text, attrib
-
-def _add_function_prefix(formula_text):
-    """
-    通常の数式内の新関数に_xlfn.プレフィックスを追加する
-    
-    Args:
-        formula_text: 数式テキスト（"=UPPER(TEXTBEFORE(B2,"@"))"）
-    
-    Returns:
-        str: プレフィックスが追加された数式
-    """
-    if not formula_text or not formula_text.startswith('='):
-        return formula_text
-    
-    # =を一時的に削除
-    formula_without_eq = formula_text[1:]
-    
-    # 新関数にプレフィックスを追加
-    import re
-    for func in EXCEL_NEW_FUNCTIONS:
-        # 単語境界を使って関数名を正確にマッチング
-        pattern = r'\b' + func + r'\b'
-        # _xlfn.が既に付いていない場合のみ追加
-        if not re.search(r'_xlfn\.' + func, formula_without_eq):
-            formula_without_eq = re.sub(pattern, '_xlfn.' + func, formula_without_eq)
-    
-    # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
-    formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
-    formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
-    
-    return '=' + formula_without_eq
 
 def _set_attributes(cell, styled=None):
     """
@@ -143,6 +102,7 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
             attrib = dict(value)
             value = None
 
+
         formula = SubElement(el, 'f', attrib)
         if value is not None and not attrib.get('t') == "dataTable":
             # スピル数式は既に処理済み、通常の数式は=を削除
@@ -199,11 +159,26 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
             elif isinstance(value, DataTableFormula):
                 attrib = dict(value)
                 value = None
+            # LAMBDA/LET関数も配列式として処理
+            elif isinstance(value, str) and ('LAMBDA' in value or 'LET' in value):
+                # プレフィックスを追加
+                value = _add_function_prefix(value)
+                # =を削除
+                if value.startswith('='):
+                    value = value[1:]
+                # 配列式の属性を設定
+                attrib = {
+                    't': 'array',
+                    'ref': cell.coordinate
+                }
 
             with xf.element('f', attrib):
                 if value is not None and not attrib.get('t') == "dataTable":
-                    # スピル数式は既に処理済み、通常の数式は=を削除
-                    if not getattr(cell, "_is_spill", False):
+                    # LAMBDA/LET関数は既に処理済み
+                    is_lambda_or_let = attrib.get('t') == 'array' and original_value and isinstance(original_value, str) and ('LAMBDA' in original_value or 'LET' in original_value)
+                    
+                    # スピル数式とLAMBDA/LET関数は既に処理済み、通常の数式は=を削除
+                    if not getattr(cell, "_is_spill", False) and not is_lambda_or_let:
                         # 通常の数式でも新関数にプレフィックスを追加
                         value = _add_function_prefix(value)
                         xf.write(value[1:] if value.startswith('=') else value)
