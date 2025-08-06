@@ -101,12 +101,26 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
         elif isinstance(value, DataTableFormula):
             attrib = dict(value)
             value = None
-
+        # LAMBDA/LET関数も配列式として処理
+        elif isinstance(value, str) and ('LAMBDA' in value or 'LET' in value):
+            # プレフィックスを追加
+            value = _add_function_prefix(value)
+            # =を削除
+            if value.startswith('='):
+                value = value[1:]
+            # 配列式の属性を設定
+            attrib = {
+                't': 'array',
+                'ref': cell.coordinate
+            }
 
         formula = SubElement(el, 'f', attrib)
         if value is not None and not attrib.get('t') == "dataTable":
-            # スピル数式は既に処理済み、通常の数式は=を削除
-            if not getattr(cell, "_is_spill", False):
+            # LAMBDA/LET関数は既に処理済み
+            is_lambda_or_let = attrib.get('t') == 'array' and original_value and isinstance(original_value, str) and ('LAMBDA' in original_value or 'LET' in original_value)
+            
+            # スピル数式とLAMBDA/LET関数は既に処理済み、通常の数式は=を削除
+            if not getattr(cell, "_is_spill", False) and not is_lambda_or_let:
                 # 通常の数式でも新関数にプレフィックスを追加
                 value = _add_function_prefix(value)
                 formula.text = value[1:] if value.startswith('=') else value

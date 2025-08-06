@@ -37,28 +37,28 @@ def test_lambda_basic(worksheet, write_cell_implementation):
         # Simple LAMBDA with one parameter
         ("A1", '=LAMBDA(x,x*2)(5)', """
     <c r="A1">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)(5)</f>
+      <f t="array" ref="A1">_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)(5)</f>
       <v/>
     </c>"""),
         
         # LAMBDA with two parameters
         ("A2", '=LAMBDA(x,y,x+y)(3,4)', """
     <c r="A2">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)(3,4)</f>
+      <f t="array" ref="A2">_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)(3,4)</f>
       <v/>
     </c>"""),
         
         # LAMBDA with three parameters
         ("A3", '=LAMBDA(a,b,c,a+b*c)(2,3,4)', """
     <c r="A3">
-      <f>_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlpm.c,_xlpm.a+_xlpm.b*_xlpm.c)(2,3,4)</f>
+      <f t="array" ref="A3">_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlpm.c,_xlpm.a+_xlpm.b*_xlpm.c)(2,3,4)</f>
       <v/>
     </c>"""),
         
         # LAMBDA with string concatenation
         ("A4", '=LAMBDA(x,y,CONCATENATE(x," ",y))("Hello","World")', """
     <c r="A4">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlpm.y,CONCATENATE(_xlpm.x," ",_xlpm.y))("Hello","World")</f>
+      <f t="array" ref="A4">_xlfn.LAMBDA(_xlpm.x,_xlpm.y,CONCATENATE(_xlpm.x," ",_xlpm.y))("Hello","World")</f>
       <v/>
     </c>"""),
     ]
@@ -86,21 +86,21 @@ def test_lambda_nested(worksheet, write_cell_implementation):
         # LAMBDA returning LAMBDA
         ("B1", '=LAMBDA(x,LAMBDA(y,x+y))(5)(3)', """
     <c r="B1">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlfn.LAMBDA(_xlpm.y,_xlpm.x+_xlpm.y))(5)(3)</f>
+      <f t="array" ref="B1">_xlfn.LAMBDA(_xlpm.x,_xlfn.LAMBDA(_xlpm.y,_xlpm.x+_xlpm.y))(5)(3)</f>
       <v/>
     </c>"""),
         
         # Triple nested LAMBDA
         ("B2", '=LAMBDA(x,LAMBDA(y,LAMBDA(z,x+y+z)))(1)(2)(3)', """
     <c r="B2">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlfn.LAMBDA(_xlpm.y,_xlfn.LAMBDA(_xlpm.z,_xlpm.x+_xlpm.y+_xlpm.z)))(1)(2)(3)</f>
+      <f t="array" ref="B2">_xlfn.LAMBDA(_xlpm.x,_xlfn.LAMBDA(_xlpm.y,_xlfn.LAMBDA(_xlpm.z,_xlpm.x+_xlpm.y+_xlpm.z)))(1)(2)(3)</f>
       <v/>
     </c>"""),
         
         # Conditional LAMBDA selection
         ("B3", '=LAMBDA(x,IF(x>0,LAMBDA(y,x+y),LAMBDA(y,x-y)))(5)(3)', """
     <c r="B3">
-      <f>_xlfn.LAMBDA(_xlpm.x,IF(_xlpm.x>0,_xlfn.LAMBDA(_xlpm.y,_xlpm.x+_xlpm.y),_xlfn.LAMBDA(_xlpm.y,_xlpm.x-_xlpm.y)))(5)(3)</f>
+      <f t="array" ref="B3">_xlfn.LAMBDA(_xlpm.x,IF(_xlpm.x>0,_xlfn.LAMBDA(_xlpm.y,_xlpm.x+_xlpm.y),_xlfn.LAMBDA(_xlpm.y,_xlpm.x-_xlpm.y)))(5)(3)</f>
       <v/>
     </c>"""),
     ]
@@ -179,28 +179,28 @@ def test_let_basic(worksheet, write_cell_implementation):
         # Single variable
         ("D1", '=LET(x,10,x*2)', """
     <c r="D1">
-      <f>_xlfn.LET(_xlpm.x,10,_xlpm.x*2)</f>
+      <f t="array" ref="D1">_xlfn.LET(_xlpm.x,10,_xlpm.x*2)</f>
       <v/>
     </c>"""),
         
         # Multiple variables
         ("D2", '=LET(x,5,y,10,x+y)', """
     <c r="D2">
-      <f>_xlfn.LET(_xlpm.x,5,_xlpm.y,10,_xlpm.x+_xlpm.y)</f>
+      <f t="array" ref="D2">_xlfn.LET(_xlpm.x,5,_xlpm.y,10,_xlpm.x+_xlpm.y)</f>
       <v/>
     </c>"""),
         
         # Variable dependencies
         ("D3", '=LET(x,5,y,x*2,z,y+3,x+y+z)', """
     <c r="D3">
-      <f>_xlfn.LET(_xlpm.x,5,_xlpm.y,_xlpm.x*2,_xlpm.z,_xlpm.y+3,_xlpm.x+_xlpm.y+_xlpm.z)</f>
+      <f t="array" ref="D3">_xlfn.LET(_xlpm.x,5,_xlpm.y,_xlpm.x*2,_xlpm.z,_xlpm.y+3,_xlpm.x+_xlpm.y+_xlpm.z)</f>
       <v/>
     </c>"""),
         
         # String variables
         ("D4", '=LET(prefix,"ID-",num,123,CONCATENATE(prefix,num))', """
     <c r="D4">
-      <f>_xlfn.LET(_xlpm.prefix,"ID-",_xlpm.num,123,CONCATENATE(_xlpm.prefix,_xlpm.num))</f>
+      <f t="array" ref="D4">_xlfn.LET(_xlpm.prefix,"ID-",_xlpm.num,123,CONCATENATE(_xlpm.prefix,_xlpm.num))</f>
       <v/>
     </c>"""),
     ]
@@ -227,21 +227,21 @@ def test_let_with_lambda(worksheet, write_cell_implementation):
         # LAMBDA as a variable
         ("E1", '=LET(double,LAMBDA(x,x*2),double(15))', """
     <c r="E1">
-      <f>_xlfn.LET(_xlpm.double,_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2),_xlpm.double(15))</f>
+      <f t="array" ref="E1">_xlfn.LET(_xlpm.double,_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2),_xlpm.double(15))</f>
       <v/>
     </c>"""),
         
         # Multiple LAMBDAs
         ("E2", '=LET(add,LAMBDA(x,y,x+y),mul,LAMBDA(x,y,x*y),add(3,mul(4,5)))', """
     <c r="E2">
-      <f>_xlfn.LET(_xlpm.add,_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y),_xlpm.mul,_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x*_xlpm.y),_xlpm.add(3,_xlpm.mul(4,5)))</f>
+      <f t="array" ref="E2">_xlfn.LET(_xlpm.add,_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y),_xlpm.mul,_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x*_xlpm.y),_xlpm.add(3,_xlpm.mul(4,5)))</f>
       <v/>
     </c>"""),
         
         # Conditional LAMBDA
         ("E3", '=LET(check,LAMBDA(x,IF(x>0,"正","負")),check(5))', """
     <c r="E3">
-      <f>_xlfn.LET(_xlpm.check,_xlfn.LAMBDA(_xlpm.x,IF(_xlpm.x>0,"正","負")),_xlpm.check(5))</f>
+      <f t="array" ref="E3">_xlfn.LET(_xlpm.check,_xlfn.LAMBDA(_xlpm.x,IF(_xlpm.x>0,"正","負")),_xlpm.check(5))</f>
       <v/>
     </c>"""),
     ]
@@ -268,14 +268,14 @@ def test_let_with_array_functions(worksheet, write_cell_implementation):
         # LET with SEQUENCE
         ("F1", '=LET(size,5,arr,SEQUENCE(size),SUM(arr))', """
     <c r="F1">
-      <f>_xlfn.LET(_xlpm.size,5,_xlpm.arr,_xlfn.SEQUENCE(_xlpm.size),SUM(_xlpm.arr))</f>
+      <f t="array" ref="F1">_xlfn.LET(_xlpm.size,5,_xlpm.arr,_xlfn.SEQUENCE(_xlpm.size),SUM(_xlpm.arr))</f>
       <v/>
     </c>"""),
         
         # LET with FILTER
         ("F2", '=LET(data,{1,2,3,4,5},filtered,FILTER(data,data>2),SUM(filtered))', """
     <c r="F2">
-      <f>_xlfn.LET(_xlpm.data,{1,2,3,4,5},_xlpm.filtered,_xlfn._xlws.FILTER(_xlpm.data,_xlpm.data>2),SUM(_xlpm.filtered))</f>
+      <f t="array" ref="F2">_xlfn.LET(_xlpm.data,{1,2,3,4,5},_xlpm.filtered,_xlfn._xlws.FILTER(_xlpm.data,_xlpm.data>2),SUM(_xlpm.filtered))</f>
       <v/>
     </c>"""),
         
@@ -324,14 +324,14 @@ def test_text_processing_with_lambda_let(worksheet, write_cell_implementation):
         # TEXTBEFORE in LET
         ("G2", '=LET(email,"user@example.com",TEXTBEFORE(email,"@"))', """
     <c r="G2">
-      <f>_xlfn.LET(_xlpm.email,"user@example.com",_xlfn.TEXTBEFORE(_xlpm.email,"@"))</f>
+      <f t="array" ref="G2">_xlfn.LET(_xlpm.email,"user@example.com",_xlfn.TEXTBEFORE(_xlpm.email,"@"))</f>
       <v/>
     </c>"""),
         
         # LAMBDA with TEXTBEFORE
         ("G3", '=LET(getName,LAMBDA(email,TEXTBEFORE(email,"@")),getName("john@company.com"))', """
     <c r="G3">
-      <f>_xlfn.LET(_xlpm.getName,_xlfn.LAMBDA(_xlpm.email,_xlfn.TEXTBEFORE(_xlpm.email,"@")),_xlpm.getName("john@company.com"))</f>
+      <f t="array" ref="G3">_xlfn.LET(_xlpm.getName,_xlfn.LAMBDA(_xlpm.email,_xlfn.TEXTBEFORE(_xlpm.email,"@")),_xlpm.getName("john@company.com"))</f>
       <v/>
     </c>"""),
     ]
@@ -366,28 +366,28 @@ def test_lambda_let_edge_cases(worksheet, write_cell_implementation):
         # Empty array handling
         ("H1", '=LET(empty,FILTER({1,2,3},FALSE),IFERROR(SUM(empty),0))', """
     <c r="H1">
-      <f>_xlfn.LET(_xlpm.empty,_xlfn._xlws.FILTER({1,2,3},FALSE),IFERROR(SUM(_xlpm.empty),0))</f>
+      <f t="array" ref="H1">_xlfn.LET(_xlpm.empty,_xlfn._xlws.FILTER({1,2,3},FALSE),IFERROR(SUM(_xlpm.empty),0))</f>
       <v/>
     </c>"""),
         
         # Type conversion
         ("H2", '=LET(txt,"123",num,VALUE(txt),num*2)', """
     <c r="H2">
-      <f>_xlfn.LET(_xlpm.txt,"123",_xlpm.num,VALUE(_xlpm.txt),_xlpm.num*2)</f>
+      <f t="array" ref="H2">_xlfn.LET(_xlpm.txt,"123",_xlpm.num,VALUE(_xlpm.txt),_xlpm.num*2)</f>
       <v/>
     </c>"""),
         
         # Error handling in LAMBDA
         ("H3", '=LAMBDA(x,y,IFERROR(x/y,"Error"))(10,0)', """
     <c r="H3">
-      <f>_xlfn.LAMBDA(_xlpm.x,_xlpm.y,IFERROR(_xlpm.x/_xlpm.y,"Error"))(10,0)</f>
+      <f t="array" ref="H3">_xlfn.LAMBDA(_xlpm.x,_xlpm.y,IFERROR(_xlpm.x/_xlpm.y,"Error"))(10,0)</f>
       <v/>
     </c>"""),
         
         # Range checking LAMBDA
         ("H4", '=LET(checkRange,LAMBDA(x,min,max,AND(x>=min,x<=max)),checkRange(15,10,20))', """
     <c r="H4">
-      <f>_xlfn.LET(_xlpm.checkRange,_xlfn.LAMBDA(_xlpm.x,_xlpm.min,_xlpm.max,AND(_xlpm.x>=_xlpm.min,_xlpm.x<=_xlpm.max)),_xlpm.checkRange(15,10,20))</f>
+      <f t="array" ref="H4">_xlfn.LET(_xlpm.checkRange,_xlfn.LAMBDA(_xlpm.x,_xlpm.min,_xlpm.max,AND(_xlpm.x&gt;=_xlpm.min,_xlpm.x&lt;=_xlpm.max)),_xlpm.checkRange(15,10,20))</f>
       <v/>
     </c>"""),
     ]
