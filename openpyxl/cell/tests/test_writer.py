@@ -211,7 +211,7 @@ def test_table_formula(worksheet, write_cell_implementation):
     expected = """
     <c r="A1">
       <f t="dataTable" ref="A1:B10" />
-      <v>0</v>
+      <v/>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)
@@ -232,7 +232,7 @@ def test_array_formula(worksheet, write_cell_implementation):
     expected = """
     <c r="E2">
       <f t="array" ref="E2:E11">C2:C11*D2:D11</f>
-      <v>0</v>
+      <v/>
     </c>"""
     xml = out.getvalue()
     diff = compare_xml(xml, expected)
