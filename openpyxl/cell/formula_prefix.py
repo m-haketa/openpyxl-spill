@@ -108,13 +108,16 @@ def add_function_prefix(formula_text):
             continue
         # 単語境界を使って関数名を正確にマッチング
         pattern = r'\b' + func + r'\b'
-        # _xlfn.が既に付いていない場合のみ追加
-        if not re.search(r'_xlfn\.' + func, formula_without_eq):
+        # _xlfn.または_xlws.が既に付いていない場合のみ追加
+        if not re.search(r'(_xlfn\.|_xlws\.)' + func, formula_without_eq):
             formula_without_eq = re.sub(pattern, '_xlfn.' + func, formula_without_eq)
     
     # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
-    formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
-    formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
+    # すでに_xlws.が付いている場合は追加しない
+    if not re.search(r'_xlfn\._xlws\.SORT', formula_without_eq):
+        formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
+    if not re.search(r'_xlfn\._xlws\.FILTER', formula_without_eq):
+        formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
     
     return '=' + formula_without_eq
 
@@ -135,70 +138,129 @@ def _process_lambda_function(formula_text):
     Returns:
         str: プレフィックスが追加された数式
     """
-    # LAMBDAを_xlfn.LAMBDAに置換
-    processed_text = re.sub(r'\bLAMBDA\b', '_xlfn.LAMBDA', formula_text)
+    # 処理中のテキスト
+    processed_text = formula_text
+    
+    # LAMBDA関数を処理（最も内側から処理）
+    # まず、すべてのLAMBDA関数の位置を見つける
+    while True:
+        lambda_positions = []
+        # _xlfn.が付いていないLAMBDAのみを検索
+        for match in re.finditer(r'(?<!_xlfn\.)LAMBDA\s*\(', processed_text):
+            start = match.start()
+            end = match.end()
+            
+            # 対応する閉じ括弧を見つける
+            paren_count = 1
+            pos = end
+            in_string = False
+            quote_char = None
+            
+            while pos < len(processed_text) and paren_count > 0:
+                char = processed_text[pos]
+                
+                # 文字列リテラルの処理
+                if char in ['"', "'"] and (pos == 0 or processed_text[pos-1] != '\\'):
+                    if not in_string:
+                        in_string = True
+                        quote_char = char
+                    elif char == quote_char:
+                        in_string = False
+                        quote_char = None
+                
+                # 文字列外での括弧のカウント
+                if not in_string:
+                    if char == '(':
+                        paren_count += 1
+                    elif char == ')':
+                        paren_count -= 1
+                pos += 1
+            
+            if paren_count == 0:
+                lambda_positions.append((start, pos, pos - start))  # start, end, length
+        
+        if not lambda_positions:
+            break
+        
+        # 長さでソート（短いものから処理 = 内側から処理）
+        lambda_positions.sort(key=lambda x: x[2])
+        
+        # 最も内側のLAMBDAを処理
+        start, end, _ = lambda_positions[0]
+        lambda_expr = processed_text[start:end]
+        processed_expr = _add_xlpm_to_lambda_params(lambda_expr)
+        processed_text = processed_text[:start] + processed_expr + processed_text[end:]
     
     # LETを_xlfn.LETに置換
     processed_text = re.sub(r'\bLET\b', '_xlfn.LET', processed_text)
     
-    # LAMBDA関数を処理（最も内側から処理）
-    # まず、すべてのLAMBDA関数の位置を見つける
-    lambda_positions = []
-    for match in re.finditer(r'_xlfn\.LAMBDA\s*\(', processed_text):
-        start = match.start()
-        end = match.end()
-        
-        # 対応する閉じ括弧を見つける
-        paren_count = 1
-        pos = end
-        
-        while pos < len(processed_text) and paren_count > 0:
-            if processed_text[pos] == '(':
-                paren_count += 1
-            elif processed_text[pos] == ')':
-                paren_count -= 1
-            pos += 1
-        
-        if paren_count == 0:
-            lambda_positions.append((start, pos, pos - start))  # start, end, length
-    
-    # 長さでソート（短いものから処理 = 内側から処理）
-    lambda_positions.sort(key=lambda x: x[2])
-    
-    # 処理済みの位置を追跡
-    processed_ranges = []
-    
-    for start, end, _ in lambda_positions:
-        # すでに処理済みの範囲内にあるかチェック
-        skip = False
-        for proc_start, proc_end in processed_ranges:
-            if start >= proc_start and end <= proc_end:
-                skip = True
-                break
-        
-        if not skip:
-            lambda_expr = processed_text[start:end]
-            processed_expr = _add_xlpm_to_lambda_params(lambda_expr)
-            processed_text = processed_text[:start] + processed_expr + processed_text[end:]
-            
-            # 位置の調整
-            diff = len(processed_expr) - (end - start)
-            processed_ranges.append((start, start + len(processed_expr)))
-            
-            # 後続の位置を調整
-            for i in range(len(lambda_positions)):
-                if lambda_positions[i][0] > end:
-                    lambda_positions[i] = (
-                        lambda_positions[i][0] + diff,
-                        lambda_positions[i][1] + diff,
-                        lambda_positions[i][2]
-                    )
-    
-    # LET関数内の変数参照も処理
+    # LET関数内の変数を処理
     processed_text = _process_let_variables(processed_text)
     
     return processed_text
 
+
+def _protect_string_literals(text):
+    """
+    文字列リテラルと配列リテラル内の内容を保護するため、一時的に置換する
+    
+    Args:
+        text: 処理対象のテキスト
+    
+    Returns:
+        tuple: (保護済みテキスト, 保護したリテラルのリスト)
+    """
+    import re
+    
+    literals = []
+    protected = text
+    
+    # 配列リテラル（波括弧内）を検出して保護
+    array_pattern = r'\{[^\}]*\}'
+    array_matches = list(re.finditer(array_pattern, text))
+    
+    # 後ろから置換（インデックスがずれないように）
+    for match in reversed(array_matches):
+        array_content = match.group(0)
+        placeholder = f'__ARRAY_{len(literals)}__'
+        literals.insert(0, array_content)
+        protected = protected[:match.start()] + placeholder + protected[match.end():]
+    
+    # ダブルクォートで囲まれた文字列を検出
+    string_pattern = r'"([^"]*)"'
+    string_matches = list(re.finditer(string_pattern, protected))
+    
+    # 後ろから置換（インデックスがずれないように）
+    for match in reversed(string_matches):
+        string_content = match.group(0)
+        placeholder = f'__STRING_{len(literals)}__'
+        literals.insert(0, string_content)
+        protected = protected[:match.start()] + placeholder + protected[match.end():]
+    
+    return protected, literals
+
+def _restore_string_literals(text, literals):
+    """
+    保護した文字列リテラルと配列リテラルを元に戻す
+    
+    Args:
+        text: 保護済みテキスト
+        literals: 保護したリテラルのリスト
+    
+    Returns:
+        str: 復元されたテキスト
+    """
+    restored = text
+    for i, literal_content in enumerate(literals):
+        # 文字列リテラルのプレースホルダ
+        string_placeholder = f'__STRING_{i}__'
+        restored = restored.replace(string_placeholder, literal_content)
+        
+        # 配列リテラルのプレースホルダ
+        array_placeholder = f'__ARRAY_{i}__'
+        restored = restored.replace(array_placeholder, literal_content)
+    
+    return restored
 
 def _add_xlpm_to_lambda_params(lambda_expr):
     """
@@ -212,13 +274,13 @@ def _add_xlpm_to_lambda_params(lambda_expr):
     5. 式内の他の新関数（SEQUENCE等）にも適切なプレフィックスを付与
     
     Args:
-        lambda_expr: "_xlfn.LAMBDA(x,y,x+y)"のようなLAMBDA式
+        lambda_expr: "LAMBDA(x,y,x+y)"のようなLAMBDA式
     
     Returns:
         str: "_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)"
     """
     # LAMBDA(の後の内容を抽出
-    match = re.match(r'(_xlfn\.LAMBDA\s*\()(.+)(\)$)', lambda_expr)
+    match = re.match(r'(.*?LAMBDA\s*\()(.+)(\))', lambda_expr)
     if not match:
         return lambda_expr
     
@@ -226,26 +288,44 @@ def _add_xlpm_to_lambda_params(lambda_expr):
     content = match.group(2)
     suffix = match.group(3)
     
-    # カンマで分割（ただし、括弧内のカンマは無視）
+    # カンマで分割（括弧、波括弧、文字列リテラル内のカンマは無視）
     parts = []
     current = ""
     paren_depth = 0
+    brace_depth = 0
+    in_string = False
+    quote_char = None
     
-    for char in content:
-        if char == '(':
-            paren_depth += 1
-        elif char == ')':
-            paren_depth -= 1
-        elif char == ',' and paren_depth == 0:
-            parts.append(current.strip())
-            current = ""
-            continue
+    for i, char in enumerate(content):
+        # 文字列リテラルの開始・終了を検出
+        if char in ['"', "'"] and (i == 0 or content[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                quote_char = char
+            elif char == quote_char:
+                in_string = False
+                quote_char = None
+        
+        # 文字列リテラル内でない場合のみ括弧をカウント
+        if not in_string:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            elif char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+            elif char == ',' and paren_depth == 0 and brace_depth == 0:
+                parts.append(current.strip())
+                current = ""
+                continue
         current += char
     
     if current:
         parts.append(current.strip())
     
-    # 最後の要素が式、それ以前がパラメータ
+    # LAMBDAは最後の要素が式、それ以前がパラメータ
     if len(parts) < 2:
         return lambda_expr
     
@@ -262,29 +342,20 @@ def _add_xlpm_to_lambda_params(lambda_expr):
         processed_params.append('_xlpm.' + param_name)
         param_names.append(param_name)
     
-    # 式内のパラメータ参照も置換
-    processed_expr = expression
-    for param_name in param_names:
-        # 単語境界を使用して正確に置換
-        processed_expr = re.sub(r'\b' + re.escape(param_name) + r'\b', 
-                                '_xlpm.' + param_name, processed_expr)
+    # 式内のパラメータ参照も置換（文字列リテラル内は除外）
+    processed_expr = _replace_var_refs_outside_strings(expression, param_names)
     
-    # 式内の他の新関数にもプレフィックスを追加
-    # EXCEL_NEW_FUNCTIONSから取得
-    for func in EXCEL_NEW_FUNCTIONS:
-        if func in ['LAMBDA', 'LET']:  # 既に処理済み
-            continue
-        # 関数名の前に_xlfn.が付いていない場合のみ追加
-        pattern = r'\b' + func + r'\b'
-        if not re.search(r'_xlfn\.' + func, processed_expr):
-            processed_expr = re.sub(pattern, '_xlfn.' + func, processed_expr)
-    
-    # SORT関数とFILTER関数の特殊ケース
-    processed_expr = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', processed_expr)
-    processed_expr = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', processed_expr)
+    # 式内の他の新関数にもプレフィックスを追加（既に_xlfn.が付いていない場合のみ）
+    for func_name in EXCEL_NEW_FUNCTIONS:
+        if func_name != 'LAMBDA' and func_name != 'LET':  # LAMBDAとLETは別処理
+            processed_expr = re.sub(r'\b' + re.escape(func_name) + r'\(', '_xlfn.' + func_name + '(', processed_expr)
     
     # 再構築
-    result = prefix + ','.join(processed_params) + ',' + processed_expr + suffix
+    # prefixに既に_xlfn.が含まれているかチェック
+    if '_xlfn.LAMBDA' in prefix:
+        result = prefix + ','.join(processed_params + [processed_expr]) + suffix
+    else:
+        result = prefix.replace('LAMBDA', '_xlfn.LAMBDA') + ','.join(processed_params + [processed_expr]) + suffix
     return result
 
 
@@ -347,6 +418,70 @@ def _process_let_variables(formula_text):
     return result
 
 
+def _replace_var_refs_outside_strings(text, var_names):
+    """
+    文字列リテラル外の変数参照のみを置換する
+    
+    Args:
+        text: 置換対象のテキスト
+        var_names: 置換する変数名のリスト
+    
+    Returns:
+        str: 変数参照が置換されたテキスト
+    """
+    if not var_names:
+        return text
+    
+    result = []
+    in_string = False
+    quote_char = None
+    i = 0
+    
+    while i < len(text):
+        char = text[i]
+        
+        # 文字列リテラルの開始・終了を検出
+        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                quote_char = char
+                result.append(char)
+                i += 1
+                continue
+            elif char == quote_char:
+                in_string = False
+                quote_char = None
+                result.append(char)
+                i += 1
+                continue
+        
+        # 文字列リテラル内の場合はそのまま追加
+        if in_string:
+            result.append(char)
+            i += 1
+            continue
+        
+        # 文字列リテラル外で変数名をチェック
+        matched = False
+        for var_name in var_names:
+            # 単語境界をチェック
+            if text[i:i+len(var_name)] == var_name:
+                # 前後が単語構成文字でないことを確認
+                before_ok = i == 0 or not text[i-1].isalnum() and text[i-1] != '_'
+                after_ok = i+len(var_name) >= len(text) or not text[i+len(var_name)].isalnum() and text[i+len(var_name)] != '_'
+                
+                if before_ok and after_ok:
+                    result.append('_xlpm.' + var_name)
+                    i += len(var_name)
+                    matched = True
+                    break
+        
+        if not matched:
+            result.append(char)
+            i += 1
+    
+    return ''.join(result)
+
 def _add_xlpm_to_let_vars(let_expr):
     """
     LET式の変数に_xlpm.プレフィックスを追加
@@ -375,20 +510,38 @@ def _add_xlpm_to_let_vars(let_expr):
     content = match.group(2)
     suffix = match.group(3)
     
-    # カンマで分割（括弧内のカンマは無視）
+    # カンマで分割（括弧、波括弧、文字列リテラル内のカンマは無視）
     parts = []
     current = ""
     paren_depth = 0
+    brace_depth = 0
+    in_string = False
+    quote_char = None
     
-    for char in content:
-        if char == '(':
-            paren_depth += 1
-        elif char == ')':
-            paren_depth -= 1
-        elif char == ',' and paren_depth == 0:
-            parts.append(current.strip())
-            current = ""
-            continue
+    for i, char in enumerate(content):
+        # 文字列リテラルの開始・終了を検出
+        if char in ['"', "'"] and (i == 0 or content[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                quote_char = char
+            elif char == quote_char:
+                in_string = False
+                quote_char = None
+        
+        # 文字列リテラル内でない場合のみ括弧をカウント
+        if not in_string:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            elif char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+            elif char == ',' and paren_depth == 0 and brace_depth == 0:
+                parts.append(current.strip())
+                current = ""
+                continue
         current += char
     
     if current:
@@ -411,19 +564,13 @@ def _add_xlpm_to_let_vars(let_expr):
         processed_parts.append('_xlpm.' + var_name)
         
         if var_value:
-            # 値の中の既存の変数参照も置換
-            processed_value = var_value
-            for existing_var in var_names[:-1]:  # 現在より前に定義された変数のみ
-                processed_value = re.sub(r'\b' + re.escape(existing_var) + r'\b',
-                                        '_xlpm.' + existing_var, processed_value)
+            # 値の中の既存の変数参照も置換（文字列リテラル内は除外）
+            processed_value = _replace_var_refs_outside_strings(var_value, var_names[:-1])
             processed_parts.append(processed_value)
     
     # 最後の式を処理
     final_expr = parts[-1]
-    for var_name in var_names:
-        final_expr = re.sub(r'\b' + re.escape(var_name) + r'\b',
-                            '_xlpm.' + var_name, final_expr)
-    
+    final_expr = _replace_var_refs_outside_strings(final_expr, var_names)
     processed_parts.append(final_expr)
     
     # 再構築
