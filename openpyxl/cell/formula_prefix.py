@@ -21,7 +21,9 @@ EXCEL_NEW_FUNCTIONS = {
     'ARRAYTOTEXT', 'VALUETOTEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTSPLIT',
     'REGEXEXTRACT', 'REGEXREPLACE', 'REGEXTEST',
     # フェーズ4: LAMBDA関連
-    'LAMBDA', 'LET'
+    'LAMBDA', 'LET',
+    # フェーズ6: LAMBDAを使う各種関数
+    'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY'
 }
 
 
@@ -264,20 +266,22 @@ def _restore_string_literals(text, literals):
 
 def _add_xlpm_to_lambda_params(lambda_expr):
     """
-    LAMBDA式のパラメータに_xlpm.プレフィックスを追加
+    LAMBDA式のパラメータに_xlpm.または_xlop.プレフィックスを追加
     
     この関数はLAMBDA関数の引数部分を解析し：
     1. カンマで区切られた引数リストを解析（括弧の入れ子を考慮）
     2. 最後の要素を式、それ以前をパラメータとして分離
-    3. 各パラメータ名に_xlpm.プレフィックスを追加
+    3. 各パラメータ名に適切なプレフィックスを追加
+       - 通常のパラメータ: _xlpm.
+       - オプショナルパラメータ（[]で囲まれた）: _xlop.
     4. 式内のパラメータ参照も同様に置換
     5. 式内の他の新関数（SEQUENCE等）にも適切なプレフィックスを付与
     
     Args:
-        lambda_expr: "LAMBDA(x,y,x+y)"のようなLAMBDA式
+        lambda_expr: "LAMBDA(x,[y],x+y)"のようなLAMBDA式
     
     Returns:
-        str: "_xlfn.LAMBDA(_xlpm.x,_xlpm.y,_xlpm.x+_xlpm.y)"
+        str: "_xlfn.LAMBDA(_xlpm.x,_xlop.y,_xlpm.x+_xlpm.y)"
     """
     # LAMBDA(の後の内容を抽出
     match = re.match(r'(.*?LAMBDA\s*\()(.+)(\))', lambda_expr)
@@ -332,15 +336,25 @@ def _add_xlpm_to_lambda_params(lambda_expr):
     params = parts[:-1]
     expression = parts[-1]
     
-    # パラメータに_xlpm.を追加
+    # パラメータに適切なプレフィックスを追加
     processed_params = []
     param_names = []
     
     for param in params:
         # パラメータ名を抽出（空白を除去）
-        param_name = param.strip()
-        processed_params.append('_xlpm.' + param_name)
-        param_names.append(param_name)
+        param_str = param.strip()
+        
+        # オプショナルパラメータ（[]で囲まれた）かチェック
+        if param_str.startswith('[') and param_str.endswith(']'):
+            # オプショナルパラメータ
+            param_name = param_str[1:-1].strip()
+            processed_params.append('_xlop.' + param_name)
+            param_names.append(param_name)
+        else:
+            # 通常のパラメータ
+            param_name = param_str
+            processed_params.append('_xlpm.' + param_name)
+            param_names.append(param_name)
     
     # 式内のパラメータ参照も置換（文字列リテラル内は除外）
     processed_expr = _replace_var_refs_outside_strings(expression, param_names)
