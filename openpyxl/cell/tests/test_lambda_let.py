@@ -403,3 +403,342 @@ def test_lambda_let_edge_cases(worksheet, write_cell_implementation):
         xml = out.getvalue()
         diff = compare_xml(xml, expected)
         assert diff is None, f"Failed for {formula}: {diff}"
+
+
+# ========== Phase 6 LAMBDA-based functions tests ==========
+
+def test_map_function(worksheet, write_cell_implementation):
+    """Test MAP function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # MAP with simple calculation
+        ("I1", '=MAP(I2:I4,LAMBDA(x,x*2))', 'I1:I3', """
+    <c r="I1" cm="1">
+      <f t="array" ref="I1:I3">_xlfn.MAP(I2:I4,_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # MAP with tax calculation
+        ("I5", '=MAP(I6:I8,LAMBDA(price,price*1.1))', 'I5:I7', """
+    <c r="I5" cm="1">
+      <f t="array" ref="I5:I7">_xlfn.MAP(I6:I8,_xlfn.LAMBDA(_xlpm.price,_xlpm.price*1.1))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # MAP with conditional logic
+        ("I9", '=MAP(I10:I12,LAMBDA(score,IF(score>=90,"A",IF(score>=80,"B","C"))))', 'I9:I11', """
+    <c r="I9" cm="1">
+      <f t="array" ref="I9:I11">_xlfn.MAP(I10:I12,_xlfn.LAMBDA(_xlpm.score,IF(_xlpm.score>=90,"A",IF(_xlpm.score>=80,"B","C"))))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for MAP {formula}: {diff}"
+
+
+def test_reduce_function(worksheet, write_cell_implementation):
+    """Test REDUCE function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # REDUCE for sum - returns single value but still uses array formula
+        ("J1", '=REDUCE(0,J2:J6,LAMBDA(acc,val,acc+val))', 'J1', """
+    <c r="J1" cm="1">
+      <f t="array" ref="J1">_xlfn.REDUCE(0,J2:J6,_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,_xlpm.acc+_xlpm.val))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # REDUCE for maximum
+        ("J7", '=REDUCE(0,J8:J12,LAMBDA(acc,val,IF(val>acc,val,acc)))', 'J7', """
+    <c r="J7" cm="1">
+      <f t="array" ref="J7">_xlfn.REDUCE(0,J8:J12,_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,IF(_xlpm.val>_xlpm.acc,_xlpm.val,_xlpm.acc)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # REDUCE for product
+        ("J13", '=REDUCE(1,J14:J18,LAMBDA(acc,val,acc*val))', 'J13', """
+    <c r="J13" cm="1">
+      <f t="array" ref="J13">_xlfn.REDUCE(1,J14:J18,_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,_xlpm.acc*_xlpm.val))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for REDUCE {formula}: {diff}"
+
+
+def test_scan_function(worksheet, write_cell_implementation):
+    """Test SCAN function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # SCAN for cumulative sum
+        ("K1", '=SCAN(0,K2:K6,LAMBDA(acc,val,acc+val))', 'K1:K5', """
+    <c r="K1" cm="1">
+      <f t="array" ref="K1:K5">_xlfn.SCAN(0,K2:K6,_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,_xlpm.acc+_xlpm.val))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # SCAN for cumulative average
+        ("K7", '=SCAN(0,K8:K12,LAMBDA(acc,val,IF(acc=0,val,(acc+val)/2)))', 'K7:K11', """
+    <c r="K7" cm="1">
+      <f t="array" ref="K7:K11">_xlfn.SCAN(0,K8:K12,_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,IF(_xlpm.acc=0,_xlpm.val,(_xlpm.acc+_xlpm.val)/2)))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for SCAN {formula}: {diff}"
+
+
+def test_byrow_function(worksheet, write_cell_implementation):
+    """Test BYROW function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # BYROW for sum
+        ("L1", '=BYROW(L2:N4,LAMBDA(row,SUM(row)))', 'L1:L3', """
+    <c r="L1" cm="1">
+      <f t="array" ref="L1:L3">_xlfn.BYROW(L2:N4,_xlfn.LAMBDA(_xlpm.row,SUM(_xlpm.row)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # BYROW for average
+        ("L5", '=BYROW(L6:N8,LAMBDA(row,AVERAGE(row)))', 'L5:L7', """
+    <c r="L5" cm="1">
+      <f t="array" ref="L5:L7">_xlfn.BYROW(L6:N8,_xlfn.LAMBDA(_xlpm.row,AVERAGE(_xlpm.row)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # BYROW for max
+        ("L9", '=BYROW(L10:N12,LAMBDA(row,MAX(row)))', 'L9:L11', """
+    <c r="L9" cm="1">
+      <f t="array" ref="L9:L11">_xlfn.BYROW(L10:N12,_xlfn.LAMBDA(_xlpm.row,MAX(_xlpm.row)))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for BYROW {formula}: {diff}"
+
+
+def test_bycol_function(worksheet, write_cell_implementation):
+    """Test BYCOL function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # BYCOL for sum
+        ("M1", '=BYCOL(M2:O4,LAMBDA(col,SUM(col)))', 'M1:O1', """
+    <c r="M1" cm="1">
+      <f t="array" ref="M1:O1">_xlfn.BYCOL(M2:O4,_xlfn.LAMBDA(_xlpm.col,SUM(_xlpm.col)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # BYCOL for average
+        ("M5", '=BYCOL(M6:O8,LAMBDA(col,AVERAGE(col)))', 'M5:O5', """
+    <c r="M5" cm="1">
+      <f t="array" ref="M5:O5">_xlfn.BYCOL(M6:O8,_xlfn.LAMBDA(_xlpm.col,AVERAGE(_xlpm.col)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # BYCOL for standard deviation
+        ("M9", '=BYCOL(M10:O12,LAMBDA(col,STDEV(col)))', 'M9:O9', """
+    <c r="M9" cm="1">
+      <f t="array" ref="M9:O9">_xlfn.BYCOL(M10:O12,_xlfn.LAMBDA(_xlpm.col,STDEV(_xlpm.col)))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for BYCOL {formula}: {diff}"
+
+
+def test_makearray_function(worksheet, write_cell_implementation):
+    """Test MAKEARRAY function with LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # MAKEARRAY for multiplication table
+        ("N1", '=MAKEARRAY(3,3,LAMBDA(r,c,r*c))', 'N1:P3', """
+    <c r="N1" cm="1">
+      <f t="array" ref="N1:P3">_xlfn.MAKEARRAY(3,3,_xlfn.LAMBDA(_xlpm.r,_xlpm.c,_xlpm.r*_xlpm.c))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # MAKEARRAY for identity matrix
+        ("N5", '=MAKEARRAY(3,3,LAMBDA(r,c,IF(r=c,1,0)))', 'N5:P7', """
+    <c r="N5" cm="1">
+      <f t="array" ref="N5:P7">_xlfn.MAKEARRAY(3,3,_xlfn.LAMBDA(_xlpm.r,_xlpm.c,IF(_xlpm.r=_xlpm.c,1,0)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # MAKEARRAY for sequential numbers
+        ("N9", '=MAKEARRAY(2,3,LAMBDA(r,c,(r-1)*3+c))', 'N9:P10', """
+    <c r="N9" cm="1">
+      <f t="array" ref="N9:P10">_xlfn.MAKEARRAY(2,3,_xlfn.LAMBDA(_xlpm.r,_xlpm.c,(_xlpm.r-1)*3+_xlpm.c))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for MAKEARRAY {formula}: {diff}"
+
+
+def test_isomitted_function(worksheet, write_cell_implementation):
+    """Test ISOMITTED function with optional arguments in LAMBDA"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # ISOMITTED with default tax rate - [] is converted to _xlop prefix
+        ("O1", '=LAMBDA(price,[tax],price*(1+IF(ISOMITTED(tax),0.1,tax)))(1000)', 'O1', """
+    <c r="O1" cm="1">
+      <f t="array" ref="O1">_xlfn.LAMBDA(_xlpm.price,_xlop.tax,_xlpm.price*(1+IF(_xlfn.ISOMITTED(_xlpm.tax),0.1,_xlpm.tax)))(1000)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # ISOMITTED with multiple optional arguments
+        ("O2", '=LAMBDA(a,b,[c],a+b+IF(ISOMITTED(c),0,c))(10,20)', 'O2', """
+    <c r="O2" cm="1">
+      <f t="array" ref="O2">_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlop.c,_xlpm.a+_xlpm.b+IF(_xlfn.ISOMITTED(_xlpm.c),0,_xlpm.c))(10,20)</f>
+      <v>0</v>
+    </c>"""),
+        
+        # ISOMITTED with nested LAMBDA
+        ("O3", '=LAMBDA(x,[y],[z],x+IF(ISOMITTED(y),0,y)+IF(ISOMITTED(z),0,z))(5)', 'O3', """
+    <c r="O3" cm="1">
+      <f t="array" ref="O3">_xlfn.LAMBDA(_xlpm.x,_xlop.y,_xlop.z,_xlpm.x+IF(_xlfn.ISOMITTED(_xlpm.y),0,_xlpm.y)+IF(_xlfn.ISOMITTED(_xlpm.z),0,_xlpm.z))(5)</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for ISOMITTED {formula}: {diff}"
+
+
+def test_phase6_complex_combinations(worksheet, write_cell_implementation):
+    """Test complex combinations of Phase 6 functions"""
+    write_cell = write_cell_implementation
+    ws = worksheet
+    
+    test_cases = [
+        # MAP with FILTER
+        ("P1", '=MAP(FILTER(P2:P6,P2:P6>=200),LAMBDA(x,x*2))', 'P1:P3', """
+    <c r="P1" cm="1">
+      <f t="array" ref="P1:P3">_xlfn.MAP(_xlfn._xlws.FILTER(P2:P6,P2:P6>=200),_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # LET with REDUCE and MAP
+        ("P7", '=LET(data,P8:P12,avg,AVERAGE(data),MAP(data,LAMBDA(x,x-avg)))', 'P7:P11', """
+    <c r="P7" cm="1">
+      <f t="array" ref="P7:P11">_xlfn.LET(_xlpm.data,P8:P12,_xlpm.avg,AVERAGE(_xlpm.data),_xlfn.MAP(_xlpm.data,_xlfn.LAMBDA(_xlpm.x,_xlpm.x-_xlpm.avg)))</f>
+      <v>0</v>
+    </c>"""),
+        
+        # SCAN with MAP result
+        ("P13", '=SCAN(0,MAP(P14:P17,LAMBDA(x,x*2)),LAMBDA(acc,val,acc+val))', 'P13:P16', """
+    <c r="P13" cm="1">
+      <f t="array" ref="P13:P16">_xlfn.SCAN(0,_xlfn.MAP(P14:P17,_xlfn.LAMBDA(_xlpm.x,_xlpm.x*2)),_xlfn.LAMBDA(_xlpm.acc,_xlpm.val,_xlpm.acc+_xlpm.val))</f>
+      <v>0</v>
+    </c>"""),
+    ]
+    
+    for cell_ref, formula, spill_range, expected in test_cases:
+        cell = ws[cell_ref]
+        cell.value = formula
+        cell._is_spill = True
+        cell._spill_range = spill_range
+        
+        out = BytesIO()
+        with xmlfile(out) as xf:
+            write_cell(xf, ws, cell)
+        
+        xml = out.getvalue()
+        diff = compare_xml(xml, expected)
+        assert diff is None, f"Failed for complex combination {formula}: {diff}"
