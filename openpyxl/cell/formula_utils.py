@@ -43,7 +43,7 @@ AGGREGATE_ARG_POSITIONS = {
 NO_XLETA_FUNCTIONS = {'LAMBDA'}
 
 
-def _convert_special_notation(formula_text):
+def _convert_tro_notations(formula_text):
     """
     セル範囲の特殊表記（.:.、:.、.:）を対応する関数に変換
     
@@ -112,7 +112,7 @@ def _convert_special_notation(formula_text):
     return result
 
 
-def add_function_prefix(formula_text):
+def _add_function_prefix(formula_text):
     """
     通常の数式内の新関数に_xlfn.プレフィックスを追加する
     
@@ -185,7 +185,7 @@ def add_function_prefix(formula_text):
     formula_without_eq = formula_text[1:]
     
     # 特殊記法を変換（.:.、:.、.:）
-    formula_without_eq = _convert_special_notation(formula_without_eq)
+    formula_without_eq = _convert_tro_notations(formula_without_eq)
     
     # 新関数にプレフィックスを追加
     
@@ -892,7 +892,7 @@ def prepare_spill_formula(formula_text, cell):
         return "=", {}
     
     # すべての数式に対してプレフィックスを追加
-    formula_text = add_function_prefix(formula_text)
+    formula_text = _add_function_prefix(formula_text)
     
     # =がない場合は追加（_writer.pyで[1:]されるため必須）
     if not formula_text.startswith('='):

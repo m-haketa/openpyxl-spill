@@ -12,8 +12,8 @@ from openpyxl.cell._writer import (
     lxml_write_cell
 )
 from openpyxl.cell.formula_utils import (
-    add_function_prefix,
-    _convert_special_notation
+    _add_function_prefix,
+    _convert_tro_notations
 )
 from openpyxl.tests.helper import compare_xml
 
@@ -62,7 +62,7 @@ class TestSpecialNotationConversion:
         ("A1.:.B10+C1.:.D10", "_TRO_ALL(A1:B10)+_TRO_ALL(C1:D10)"),
     ])
     def test_convert_special_notation(self, formula, expected):
-        assert _convert_special_notation(formula) == expected
+        assert _convert_tro_notations(formula) == expected
     
     @pytest.mark.parametrize("formula,expected", [
         # Edge cases
@@ -75,7 +75,7 @@ class TestSpecialNotationConversion:
         ("AA.:.AC", "_TRO_ALL(AA:AC)"),  # uppercase converted
     ])
     def test_edge_cases(self, formula, expected):
-        assert _convert_special_notation(formula) == expected
+        assert _convert_tro_notations(formula) == expected
 
 
 class TestAddFunctionPrefix:
@@ -101,7 +101,7 @@ class TestAddFunctionPrefix:
          "=_xlfn.LAMBDA(_xlpm.x,SUM(_xlpm.x))(_xlfn._TRO_ALL(A1:B10))"),
     ])
     def test_add_function_prefix(self, formula, expected):
-        assert add_function_prefix(formula) == expected
+        assert _add_function_prefix(formula) == expected
 
 
 def test_special_notation_basic(worksheet, write_cell_implementation):
