@@ -60,43 +60,23 @@ def etree_write_cell(xf, worksheet, cell, styled=None):
     if cell.data_type == 'f':
         attrib = {}
         
-        # スピル数式の処理
-        original_value = value
-        if getattr(cell, "_is_spill", False):
-            value, spill_attrib = _prepare_spill_formula(value, cell)
-            attrib.update(spill_attrib)
-        elif isinstance(value, ArrayFormula):
+        # 元のコードで処理していたArrayFormula/DataTableFormulaはそのまま残す
+        if isinstance(value, ArrayFormula):
             attrib = dict(value)
             value = value.text
         elif isinstance(value, DataTableFormula):
             attrib = dict(value)
             value = None
-        # LAMBDA/LET関数も配列式として処理
-        elif isinstance(value, str) and ('LAMBDA' in value or 'LET' in value):
-            # プレフィックスを追加
-            value = _add_function_prefix(value)
-            # =を削除
-            if value.startswith('='):
-                value = value[1:]
-            # 配列式の属性を設定
-            attrib = {
-                't': 'array',
-                'ref': cell.coordinate
-            }
-
+        else:
+            # スピル数式とLAMBDA/LET関数を統合処理
+            value, spill_attrib = _prepare_spill_formula(value, cell)
+            attrib.update(spill_attrib)
+        
         formula = SubElement(el, 'f', attrib)
         if value is not None and not attrib.get('t') == "dataTable":
-            # LAMBDA/LET関数は既に処理済み
-            is_lambda_or_let = attrib.get('t') == 'array' and original_value and isinstance(original_value, str) and ('LAMBDA' in original_value or 'LET' in original_value)
+            formula.text = value[1:]
             
-            # スピル数式とLAMBDA/LET関数は既に処理済み、通常の数式は=を削除
-            if not getattr(cell, "_is_spill", False) and not is_lambda_or_let:
-                # 通常の数式でも新関数にプレフィックスを追加
-                value = _add_function_prefix(value)
-                formula.text = value[1:] if value.startswith('=') else value
-            else:
-                formula.text = value
-            # スピル数式の場合、v要素に初期値を設定（配列の最初の要素のインデックス）
+            # スピル数式の場合、v要素に初期値を設定
             if getattr(cell, "_is_spill", False):
                 value = "0"  # Excelはスピル数式の初期値として0または計算結果を期待
             else:
@@ -132,42 +112,22 @@ def lxml_write_cell(xf, worksheet, cell, styled=False):
         if cell.data_type == 'f':
             attrib = {}
             
-            # スピル数式の処理
-            original_value = value
-            if getattr(cell, "_is_spill", False):
-                value, spill_attrib = _prepare_spill_formula(value, cell)
-                attrib.update(spill_attrib)
-            elif isinstance(value, ArrayFormula):
+            # 元のコードで処理していたArrayFormula/DataTableFormulaはそのまま残す
+            if isinstance(value, ArrayFormula):
                 attrib = dict(value)
                 value = value.text
             elif isinstance(value, DataTableFormula):
                 attrib = dict(value)
                 value = None
-            # LAMBDA/LET関数も配列式として処理
-            elif isinstance(value, str) and ('LAMBDA' in value or 'LET' in value):
-                # プレフィックスを追加
-                value = _add_function_prefix(value)
-                # =を削除
-                if value.startswith('='):
-                    value = value[1:]
-                # 配列式の属性を設定
-                attrib = {
-                    't': 'array',
-                    'ref': cell.coordinate
-                }
-
+            else:
+                # スピル数式とLAMBDA/LET関数を統合処理
+                value, spill_attrib = _prepare_spill_formula(value, cell)
+                attrib.update(spill_attrib)
+            
             with xf.element('f', attrib):
                 if value is not None and not attrib.get('t') == "dataTable":
-                    # LAMBDA/LET関数は既に処理済み
-                    is_lambda_or_let = attrib.get('t') == 'array' and original_value and isinstance(original_value, str) and ('LAMBDA' in original_value or 'LET' in original_value)
+                    xf.write(value[1:])
                     
-                    # スピル数式とLAMBDA/LET関数は既に処理済み、通常の数式は=を削除
-                    if not getattr(cell, "_is_spill", False) and not is_lambda_or_let:
-                        # 通常の数式でも新関数にプレフィックスを追加
-                        value = _add_function_prefix(value)
-                        xf.write(value[1:] if value.startswith('=') else value)
-                    else:
-                        xf.write(value)
                     # スピル数式の場合、v要素に初期値を設定
                     if getattr(cell, "_is_spill", False):
                         value = "0"  # Excelはスピル数式の初期値として0または計算結果を期待

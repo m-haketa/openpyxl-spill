@@ -877,29 +877,42 @@ def _add_xlpm_to_let_vars(let_expr):
 
 def prepare_spill_formula(formula_text, cell):
     """
-    スピル数式を適切な形式に変換する
+    文字列の数式を適切な形式に変換する（スピル、LAMBDA/LET、通常の数式すべて）
+    必ず=で始まる値を返す（_writer.pyがvalue[1:]で削除するため）
     
     Args:
-        formula_text: 元の数式テキスト（"=UNIQUE(B2:B10)"）
+        formula_text: 元の数式テキスト（文字列）
         cell: Cellオブジェクト
     
     Returns:
-        tuple: (処理済み数式, 属性辞書)
+        tuple: (処理済み数式（=付き）, 属性辞書)
     """
-    if not getattr(cell, "_is_spill", False):
-        return formula_text, {}
+    # 文字列でない場合は、ダミーの=を付けて返す
+    if not isinstance(formula_text, str):
+        return "=", {}
     
-    # 新関数にプレフィックスを追加（共通処理を使用）
+    # すべての数式に対してプレフィックスを追加
     formula_text = add_function_prefix(formula_text)
     
-    # =を削除（既に削除されている場合もある）
-    if formula_text and formula_text.startswith('='):
-        formula_text = formula_text[1:]
+    # =がない場合は追加（_writer.pyで[1:]されるため必須）
+    if not formula_text.startswith('='):
+        formula_text = '=' + formula_text
     
-    # 属性を設定
-    attrib = {
-        't': 'array',
-        'ref': getattr(cell, '_spill_range', None) or cell.coordinate
-    }
+    # スピル数式の場合
+    if getattr(cell, "_is_spill", False):
+        # スピル数式の属性を設定
+        return formula_text, {
+            't': 'array',
+            'ref': getattr(cell, '_spill_range', None) or cell.coordinate
+        }
     
-    return formula_text, attrib
+    # LAMBDA/LET関数の場合（配列式として扱う）
+    elif 'LAMBDA' in formula_text or 'LET' in formula_text:
+        # 配列式の属性を設定
+        return formula_text, {
+            't': 'array',
+            'ref': cell.coordinate
+        }
+    
+    # 通常の数式
+    return formula_text, {}
