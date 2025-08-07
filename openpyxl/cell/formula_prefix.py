@@ -23,8 +23,19 @@ EXCEL_NEW_FUNCTIONS = {
     # フェーズ4: LAMBDA関連
     'LAMBDA', 'LET',
     # フェーズ6: LAMBDAを使う各種関数
-    'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY'
+    'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY',
+    # フェーズ7: 集計・分析関数
+    'GROUPBY', 'PIVOTBY', 'PERCENTOF'
 }
+
+# 集計関数の引数位置（_xleta.プレフィックスが必要な位置）
+AGGREGATE_ARG_POSITIONS = {
+    'GROUPBY': 3,  # 3番目の引数
+    'PIVOTBY': 4,  # 4番目の引数
+}
+
+# _xleta.プレフィックスが不要な関数（LAMBDAのみ）
+NO_XLETA_FUNCTIONS = {'LAMBDA'}
 
 
 def add_function_prefix(formula_text):
@@ -120,6 +131,9 @@ def add_function_prefix(formula_text):
         formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
     if not re.search(r'_xlfn\._xlws\.FILTER', formula_without_eq):
         formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
+    
+    # GROUPBY、PIVOTBY、PERCENTOF内の集計関数に_xleta.プレフィックスを追加
+    formula_without_eq = _add_xleta_to_aggregate_functions(formula_without_eq)
     
     return '=' + formula_without_eq
 
@@ -495,6 +509,198 @@ def _replace_var_refs_outside_strings(text, var_names):
             i += 1
     
     return ''.join(result)
+
+def _add_xleta_to_aggregate_functions(formula_text):
+    """
+    GROUPBY、PIVOTBYの特定の引数位置にある集計関数に_xleta.プレフィックスを追加
+    
+    - GROUPBY: 3番目の引数
+    - PIVOTBY: 4番目の引数
+    
+    Args:
+        formula_text: 数式テキスト
+    
+    Returns:
+        str: 処理済みの数式
+    """
+    result = formula_text
+    
+    # GROUPBYとPIVOTBYを処理
+    for func_name, target_arg_pos in AGGREGATE_ARG_POSITIONS.items():
+        # _xlfn.付きの関数を探す
+        pattern = r'_xlfn\.' + func_name + r'\s*\('
+        
+        # すべての該当箇所を処理
+        pos = 0
+        while True:
+            match = re.search(pattern, result[pos:])
+            if not match:
+                break
+                
+            # 関数の開始位置
+            func_start = pos + match.start()
+            func_end = pos + match.end()
+            
+            # 対応する閉じ括弧を見つける
+            paren_count = 1
+            current_pos = func_end
+            func_close_pos = func_end
+            
+            while current_pos < len(result) and paren_count > 0:
+                if result[current_pos] == '(':
+                    paren_count += 1
+                elif result[current_pos] == ')':
+                    paren_count -= 1
+                    if paren_count == 0:
+                        func_close_pos = current_pos
+                current_pos += 1
+            
+            if paren_count == 0:
+                # 関数の引数部分全体
+                args_text = result[func_end:func_close_pos]
+                
+                # 引数を解析してターゲット位置を見つける
+                arg_positions = _find_argument_positions(args_text)
+                
+                if len(arg_positions) >= target_arg_pos:
+                    # ターゲット引数の開始と終了位置
+                    arg_start, arg_end = arg_positions[target_arg_pos - 1]
+                    target_arg = args_text[arg_start:arg_end]
+                    
+                    # LAMBDA以外の場合のみ_xleta.を追加
+                    is_lambda = re.match(r'\s*_xlfn\.LAMBDA\s*\(', target_arg)
+                    
+                    if not is_lambda:
+                        # 関数名を抽出（_xlfn.プレフィックスも考慮）
+                        func_match = re.match(r'^(\s*)((?:_xlfn\.)?[A-Z]+)(\s*(?:\(.*\))?\s*)$', target_arg)
+                        if func_match:
+                            prefix_space = func_match.group(1)
+                            func_name_with_prefix = func_match.group(2)
+                            suffix = func_match.group(3)
+                            
+                            # 既に_xleta.が付いていない場合のみ追加
+                            if not re.search(r'_xleta\.', target_arg):
+                                # _xlfn.プレフィックスがある場合は置換
+                                if func_name_with_prefix.startswith('_xlfn.'):
+                                    func_name_only = func_name_with_prefix[6:]  # _xlfn.を除去
+                                    new_arg = prefix_space + '_xleta.' + func_name_only + suffix
+                                else:
+                                    new_arg = prefix_space + '_xleta.' + func_name_with_prefix + suffix
+                                
+                                # 元のテキストに置換を適用
+                                result = (result[:func_end + arg_start] + 
+                                         new_arg + 
+                                         result[func_end + arg_end:])
+                                
+                                # 次の検索位置を更新
+                                pos = func_end + arg_start + len(new_arg)
+                                continue
+            
+            pos = func_end
+    
+    return result
+
+
+def _find_argument_positions(text):
+    """
+    関数の引数の開始と終了位置を返す
+    
+    Args:
+        text: 関数の引数部分のテキスト（開き括弧の後から閉じ括弧の前まで）
+    
+    Returns:
+        list: 各引数の(開始位置, 終了位置)のタプルのリスト
+    """
+    positions = []
+    current_start = 0
+    paren_depth = 0
+    brace_depth = 0
+    in_string = False
+    quote_char = None
+    
+    for i, char in enumerate(text):
+        # 文字列リテラルの処理
+        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                quote_char = char
+            elif char == quote_char:
+                in_string = False
+                quote_char = None
+        
+        # 文字列外での括弧と波括弧のカウント
+        if not in_string:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            elif char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+            elif char == ',' and paren_depth == 0 and brace_depth == 0:
+                # 引数の終了位置を記録
+                positions.append((current_start, i))
+                current_start = i + 1
+    
+    # 最後の引数
+    if current_start < len(text):
+        positions.append((current_start, len(text)))
+    
+    return positions
+
+
+def _parse_function_arguments(text):
+    """
+    関数の引数をカンマで分割（括弧の入れ子を考慮）
+    
+    Args:
+        text: 関数の引数部分のテキスト（開き括弧の後から）
+    
+    Returns:
+        list: 引数のリスト
+    """
+    args = []
+    current_arg = ""
+    paren_depth = 0
+    brace_depth = 0
+    in_string = False
+    quote_char = None
+    
+    for i, char in enumerate(text):
+        # 文字列リテラルの処理
+        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
+            if not in_string:
+                in_string = True
+                quote_char = char
+            elif char == quote_char:
+                in_string = False
+                quote_char = None
+        
+        # 文字列外での括弧と波括弧のカウント
+        if not in_string:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                if paren_depth == 0:
+                    # 関数の終了
+                    if current_arg.strip():
+                        args.append(current_arg.strip())
+                    return args
+                paren_depth -= 1
+            elif char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+            elif char == ',' and paren_depth == 0 and brace_depth == 0:
+                args.append(current_arg.strip())
+                current_arg = ""
+                continue
+        
+        current_arg += char
+    
+    return args
+
 
 def _add_xlpm_to_let_vars(let_expr):
     """
