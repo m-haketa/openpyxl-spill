@@ -25,7 +25,11 @@ EXCEL_NEW_FUNCTIONS = {
     # LAMBDAを使う各種関数
     'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY',
     # 集計・分析関数
-    'GROUPBY', 'PIVOTBY', 'PERCENTOF'
+    'GROUPBY', 'PIVOTBY', 'PERCENTOF',
+    # その他の関数
+    'TRIMRANGE',
+    # 特殊記法変換関数
+    '_TRO_ALL', '_TRO_TRAILING', '_TRO_LEADING'
 }
 
 # 集計関数の引数位置（_xleta.プレフィックスが必要な位置）
@@ -36,6 +40,75 @@ AGGREGATE_ARG_POSITIONS = {
 
 # _xleta.プレフィックスが不要な関数（LAMBDAのみ）
 NO_XLETA_FUNCTIONS = {'LAMBDA'}
+
+
+def _convert_special_notation(formula_text):
+    """
+    セル範囲の特殊表記（.:.、:.、.:）を対応する関数に変換
+    
+    変換ルール：
+    - A1.:.B10 → _TRO_ALL(A1:B10)
+    - A1:.B10  → _TRO_TRAILING(A1:B10)
+    - A1.:B10  → _TRO_LEADING(A1:B10)
+    
+    Args:
+        formula_text: 数式テキスト（'='なし）
+    
+    Returns:
+        str: 変換後の数式
+    """
+    import re
+    
+    # パターン: セル/列/行参照 + 特殊記法 + セル/列/行参照
+    # 例: A1.:.B10, A.:.B, 1.:.10, Sheet1!A1:.B10 など
+    # セル参照: [A-Z]+[0-9]+ (例: A1, AB123)
+    # 列参照: [A-Z]+ (例: A, AB)
+    # 行参照: [0-9]+ (例: 1, 123)
+    # 絶対参照も考慮: $ 付き
+    cell_pattern = r'([A-Z]+[0-9]+|[A-Z]+\$[0-9]+|\$[A-Z]+[0-9]+|\$[A-Z]+\$[0-9]+|[A-Z]+|\$[A-Z]+|[0-9]+|\$[0-9]+)'
+    pattern = cell_pattern + r'(\.:\.|:\.|\.:)' + cell_pattern
+    
+    def replace_notation(match):
+        start_cell = match.group(1)
+        notation = match.group(2)
+        end_cell = match.group(3)
+        
+        # 通常のコロン範囲
+        cell_range = f'{start_cell}:{end_cell}'
+        
+        if notation == '.:.':
+            return f'_TRO_ALL({cell_range})'
+        elif notation == ':.':
+            return f'_TRO_TRAILING({cell_range})'
+        elif notation == '.:':
+            return f'_TRO_LEADING({cell_range})'
+    
+    # シート参照も含むパターン
+    sheet_cell_pattern = r'([A-Z]+[0-9]+|[A-Z]+\$[0-9]+|\$[A-Z]+[0-9]+|\$[A-Z]+\$[0-9]+|[A-Z]+|\$[A-Z]+|[0-9]+|\$[0-9]+)'
+    sheet_pattern = r'([A-Za-z0-9_]+!)' + sheet_cell_pattern + r'(\.:\.|:\.|\.:)' + sheet_cell_pattern
+    
+    def replace_sheet_notation(match):
+        sheet = match.group(1)
+        start_cell = match.group(2)
+        notation = match.group(3)
+        end_cell = match.group(4)
+        
+        # 通常のコロン範囲
+        cell_range = f'{sheet}{start_cell}:{sheet}{end_cell}'
+        
+        if notation == '.:.':
+            return f'_TRO_ALL({cell_range})'
+        elif notation == ':.':
+            return f'_TRO_TRAILING({cell_range})'
+        elif notation == '.:':
+            return f'_TRO_LEADING({cell_range})'
+    
+    # まずシート参照付きを変換
+    result = re.sub(sheet_pattern, replace_sheet_notation, formula_text)
+    # 次に通常のセル参照を変換
+    result = re.sub(pattern, replace_notation, result)
+    
+    return result
 
 
 def add_function_prefix(formula_text):
@@ -109,6 +182,9 @@ def add_function_prefix(formula_text):
     
     # =を一時的に削除
     formula_without_eq = formula_text[1:]
+    
+    # 特殊記法を変換（.:.、:.、.:）
+    formula_without_eq = _convert_special_notation(formula_without_eq)
     
     # 新関数にプレフィックスを追加
     
