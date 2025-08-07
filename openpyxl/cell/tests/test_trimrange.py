@@ -9,7 +9,7 @@ from openpyxl.cell._writer import (
     etree_write_cell,
     lxml_write_cell
 )
-from openpyxl.cell.formula_prefix import add_function_prefix
+from openpyxl.cell.formula_utils import add_function_prefix
 from openpyxl.tests.helper import compare_xml
 
 

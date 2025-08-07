@@ -8,38 +8,8 @@ from datetime import timedelta
 
 from openpyxl.worksheet.formula import DataTableFormula, ArrayFormula
 from openpyxl.cell.rich_text import CellRichText
-from .formula_prefix import add_function_prefix as _add_function_prefix, EXCEL_NEW_FUNCTIONS
+from .formula_utils import add_function_prefix as _add_function_prefix, prepare_spill_formula as _prepare_spill_formula, EXCEL_NEW_FUNCTIONS
 
-
-
-def _prepare_spill_formula(formula_text, cell):
-    """
-    スピル数式を適切な形式に変換する
-    
-    Args:
-        formula_text: 元の数式テキスト（"=UNIQUE(B2:B10)"）
-        cell: Cellオブジェクト
-    
-    Returns:
-        tuple: (処理済み数式, 属性辞書)
-    """
-    if not getattr(cell, "_is_spill", False):
-        return formula_text, {}
-    
-    # 新関数にプレフィックスを追加（共通処理を使用）
-    formula_text = _add_function_prefix(formula_text)
-    
-    # =を削除（既に削除されている場合もある）
-    if formula_text and formula_text.startswith('='):
-        formula_text = formula_text[1:]
-    
-    # 属性を設定
-    attrib = {
-        't': 'array',
-        'ref': getattr(cell, '_spill_range', None) or cell.coordinate
-    }
-    
-    return formula_text, attrib
 
 def _set_attributes(cell, styled=None):
     """

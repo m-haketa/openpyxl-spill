@@ -1,10 +1,11 @@
 # Copyright (c) 2010-2024 openpyxl
 
 """
-Excel 365新関数のプレフィックス処理
+Excel 365新関数のプレフィックス処理とスピル数式のユーティリティ
 
 このモジュールは、Excel 365で導入された新関数（LAMBDA、LET等）に
-必要なプレフィックス（_xlfn.、_xlpm.）を自動的に付与する機能を提供します。
+必要なプレフィックス（_xlfn.、_xlpm.）を自動的に付与する機能と、
+スピル数式の処理に必要なユーティリティ関数を提供します。
 """
 
 import re
@@ -872,3 +873,33 @@ def _add_xlpm_to_let_vars(let_expr):
     # 再構築
     result = prefix + ','.join(processed_parts) + suffix
     return result
+
+
+def prepare_spill_formula(formula_text, cell):
+    """
+    スピル数式を適切な形式に変換する
+    
+    Args:
+        formula_text: 元の数式テキスト（"=UNIQUE(B2:B10)"）
+        cell: Cellオブジェクト
+    
+    Returns:
+        tuple: (処理済み数式, 属性辞書)
+    """
+    if not getattr(cell, "_is_spill", False):
+        return formula_text, {}
+    
+    # 新関数にプレフィックスを追加（共通処理を使用）
+    formula_text = add_function_prefix(formula_text)
+    
+    # =を削除（既に削除されている場合もある）
+    if formula_text and formula_text.startswith('='):
+        formula_text = formula_text[1:]
+    
+    # 属性を設定
+    attrib = {
+        't': 'array',
+        'ref': getattr(cell, '_spill_range', None) or cell.coordinate
+    }
+    
+    return formula_text, attrib
