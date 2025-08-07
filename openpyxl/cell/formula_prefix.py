@@ -13,18 +13,18 @@ import re
 EXCEL_NEW_FUNCTIONS = {
     'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
     'RANDARRAY', 'XLOOKUP', 'XMATCH',
-    # フェーズ1: 基本的な配列操作関数（LETは別途対応予定）
+    # 基本的な配列操作関数（LETは別途対応予定）
     'VSTACK', 'HSTACK', 'TAKE', 'DROP',
     'CHOOSEROWS', 'CHOOSECOLS', 'EXPAND', 'TOCOL', 'TOROW',
     'WRAPCOLS', 'WRAPROWS',
-    # フェーズ2: テキスト処理・正規表現関数
+    # テキスト処理・正規表現関数
     'ARRAYTOTEXT', 'VALUETOTEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTSPLIT',
     'REGEXEXTRACT', 'REGEXREPLACE', 'REGEXTEST',
-    # フェーズ4: LAMBDA関連
+    # LAMBDA関連
     'LAMBDA', 'LET',
-    # フェーズ6: LAMBDAを使う各種関数
+    # LAMBDAを使う各種関数
     'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY',
-    # フェーズ7: 集計・分析関数
+    # 集計・分析関数
     'GROUPBY', 'PIVOTBY', 'PERCENTOF'
 }
 
