@@ -127,7 +127,12 @@ class ExtendedProperties(Serialisable):
         self.HyperlinksChanged = HyperlinksChanged
         self.DigSig = None
         self.Application = f"Microsoft Excel Compatible / Openpyxl {__version__}"
-        self.AppVersion = ".".join(__version__.split(".")[:-1])
+        # Extract major.minor version (e.g., "3.1" from "3.1.5+spill.20250807")
+        version_parts = __version__.split(".")
+        if len(version_parts) >= 2:
+            self.AppVersion = f"{version_parts[0]}.{version_parts[1]}"
+        else:
+            self.AppVersion = __version__
         self.DocSecurity = DocSecurity
 
 

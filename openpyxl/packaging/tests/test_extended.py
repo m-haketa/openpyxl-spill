@@ -16,11 +16,17 @@ class TestExtendedProperties:
     def test_ctor(self, ExtendedProperties):
         props = ExtendedProperties()
         xml = tostring(props.to_tree())
-        major, minor, patch = __version__.split(".")
+        # Extract major.minor for AppVersion (same logic as in extended.py)
+        version_parts = __version__.split(".")
+        if len(version_parts) >= 2:
+            app_version = f"{version_parts[0]}.{version_parts[1]}"
+        else:
+            app_version = __version__
+        
         expected = f"""
         <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
         <Application>Microsoft Excel Compatible / Openpyxl {__version__}</Application>
-        <AppVersion>{major}.{minor}</AppVersion>
+        <AppVersion>{app_version}</AppVersion>
         </Properties>
         """
         diff = compare_xml(xml, expected)
