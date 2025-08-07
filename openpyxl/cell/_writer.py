@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from openpyxl.worksheet.formula import DataTableFormula, ArrayFormula
 from openpyxl.cell.rich_text import CellRichText
-from .formula_utils import add_function_prefix as _add_function_prefix, prepare_spill_formula as _prepare_spill_formula, EXCEL_NEW_FUNCTIONS
+from .formula_utils import prepare_spill_formula as _prepare_spill_formula
 
 
 def _set_attributes(cell, styled=None):
