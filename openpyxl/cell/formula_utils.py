@@ -397,20 +397,10 @@ def _parse_let_content(formula: str) -> Tuple[List[Tuple[str, str]], str, int]:
     # LET has an odd number of arguments: pairs of (name, value) plus final expression
     # So we pair up all arguments except the last one if there's an odd count
     num_args = len(args)
-    # TODO: この条件分岐（とその内部）は冗長な気がするので後で考える
     if num_args % 2 == 1:
         # Odd number of arguments - last one is the final expression
         for j in range(0, num_args - 1, 2):
-            if j + 1 < num_args - 1:
-                var_pairs.append((args[j], args[j + 1]))
-            elif j < num_args - 1:
-                # This handles the case where we have exactly one var-value pair
-                var_pairs.append((args[j], args[j + 1]))
-    else:
-        # Even number of arguments - all are variable pairs
-        for j in range(0, num_args, 2):
-            if j + 1 < num_args:
-                var_pairs.append((args[j], args[j + 1]))
+            var_pairs.append((args[j], args[j + 1]))
     
     # Final expression
     final_expr = args[-1] if len(args) % 2 == 1 else ''
