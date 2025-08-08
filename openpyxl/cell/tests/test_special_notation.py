@@ -12,7 +12,7 @@ from openpyxl.cell._writer import (
     lxml_write_cell
 )
 from openpyxl.cell.formula_utils import (
-    _add_function_prefix,
+    prepare_spill_formula,
     _convert_tro_notations
 )
 from openpyxl.tests.helper import compare_xml
@@ -38,28 +38,28 @@ class TestSpecialNotationConversion:
     
     @pytest.mark.parametrize("formula,expected", [
         # Basic cell ranges
-        ("A1.:.B10", "_TRO_ALL(A1:B10)"),
-        ("A1:.B10", "_TRO_TRAILING(A1:B10)"),
-        ("A1.:B10", "_TRO_LEADING(A1:B10)"),
+        ("A1.:.B10", "_xlfn._TRO_ALL(A1:B10)"),
+        ("A1:.B10", "_xlfn._TRO_TRAILING(A1:B10)"),
+        ("A1.:B10", "_xlfn._TRO_LEADING(A1:B10)"),
         # Column only
-        ("A.:.C", "_TRO_ALL(A:C)"),
-        ("A:.C", "_TRO_TRAILING(A:C)"),
-        ("A.:C", "_TRO_LEADING(A:C)"),
+        ("A.:.C", "_xlfn._TRO_ALL(A:C)"),
+        ("A:.C", "_xlfn._TRO_TRAILING(A:C)"),
+        ("A.:C", "_xlfn._TRO_LEADING(A:C)"),
         # Row only
-        ("1.:.10", "_TRO_ALL(1:10)"),
-        ("5:.20", "_TRO_TRAILING(5:20)"),
-        ("100.:500", "_TRO_LEADING(100:500)"),
+        ("1.:.10", "_xlfn._TRO_ALL(1:10)"),
+        ("5:.20", "_xlfn._TRO_TRAILING(5:20)"),
+        ("100.:500", "_xlfn._TRO_LEADING(100:500)"),
         # Absolute references
-        ("$A$1.:.$B$10", "_TRO_ALL($A$1:$B$10)"),
-        ("$A.:.$C", "_TRO_ALL($A:$C)"),
+        ("$A$1.:.$B$10", "_xlfn._TRO_ALL($A$1:$B$10)"),
+        ("$A.:.$C", "_xlfn._TRO_ALL($A:$C)"),
         # Sheet references
-        ("Sheet1!A1.:.B10", "_TRO_ALL(Sheet1!A1:Sheet1!B10)"),
-        ("Data!A:.C", "_TRO_TRAILING(Data!A:Data!C)"),
+        ("Sheet1!A1.:.B10", "_xlfn._TRO_ALL(Sheet1!A1:Sheet1!B10)"),
+        ("Data!A:.C", "_xlfn._TRO_TRAILING(Data!A:Data!C)"),
         # Normal colon (no conversion)
         ("A1:B10", "A1:B10"),
         ("Sheet1!A:C", "Sheet1!A:C"),
         # Multiple notations
-        ("A1.:.B10+C1.:.D10", "_TRO_ALL(A1:B10)+_TRO_ALL(C1:D10)"),
+        ("A1.:.B10+C1.:.D10", "_xlfn._TRO_ALL(A1:B10)+_xlfn._TRO_ALL(C1:D10)"),
     ])
     def test_convert_special_notation(self, formula, expected):
         assert _convert_tro_notations(formula) == expected
@@ -72,14 +72,14 @@ class TestSpecialNotationConversion:
         (".:.B10", ".:.B10"),
         # Case sensitivity
         ("a1.:.b10", "a1.:.b10"),  # lowercase not converted
-        ("AA.:.AC", "_TRO_ALL(AA:AC)"),  # uppercase converted
+        ("AA.:.AC", "_xlfn._TRO_ALL(AA:AC)"),  # uppercase converted
     ])
     def test_edge_cases(self, formula, expected):
         assert _convert_tro_notations(formula) == expected
 
 
 class TestAddFunctionPrefix:
-    """Test add_function_prefix with special notations"""
+    """Test _add_function_prefix with special notations"""
     
     @pytest.mark.parametrize("formula,expected", [
         # Basic conversions
@@ -101,7 +101,10 @@ class TestAddFunctionPrefix:
          "=_xlfn.LAMBDA(_xlpm.x,SUM(_xlpm.x))(_xlfn._TRO_ALL(A1:B10))"),
     ])
     def test_add_function_prefix(self, formula, expected):
-        assert _add_function_prefix(formula) == expected
+        class MockCell:
+            coordinate = "A1"
+        result, _ = prepare_spill_formula(formula, MockCell())
+        assert result == expected
 
 
 def test_special_notation_basic(worksheet, write_cell_implementation):

@@ -9,7 +9,7 @@ from openpyxl.cell._writer import (
     etree_write_cell,
     lxml_write_cell
 )
-from openpyxl.cell.formula_utils import _add_function_prefix
+from openpyxl.cell.formula_utils import _add_function_prefixes
 from openpyxl.tests.helper import compare_xml
 
 
@@ -55,7 +55,7 @@ def write_cell_implementation(request):
      "=_xlfn.HSTACK(_xlfn.TRIMRANGE(A1:B5,1,1),_xlfn.TRIMRANGE(C1:D5,2,2))"),
 ])
 def test_trimrange_prefix(formula, expected):
-    assert _add_function_prefix(formula) == expected
+    assert _add_function_prefixes(formula) == expected
 
 
 def test_trimrange_basic(worksheet, write_cell_implementation):

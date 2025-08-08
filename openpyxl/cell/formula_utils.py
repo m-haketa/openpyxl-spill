@@ -1,918 +1,768 @@
-# Copyright (c) 2010-2024 openpyxl
-
 """
-Excel 365新関数のプレフィックス処理とスピル数式のユーティリティ
+Excel 365 spill formula processing utilities
 
-このモジュールは、Excel 365で導入された新関数（LAMBDA、LET等）に
-必要なプレフィックス（_xlfn.、_xlpm.）を自動的に付与する機能と、
-スピル数式の処理に必要なユーティリティ関数を提供します。
+Provides functionality to process Excel 365's new dynamic array formulas (spill formulas)
+and LAMBDA/LET functions, adding appropriate prefixes.
 """
 
 import re
-
-# Excel 365以降の新関数（_xlfn.プレフィックスが必要）
-EXCEL_NEW_FUNCTIONS = {
-    'UNIQUE', 'SORT', 'SORTBY', 'FILTER', 'SEQUENCE', 
-    'RANDARRAY', 'XLOOKUP', 'XMATCH',
-    # 基本的な配列操作関数（LETは別途対応予定）
-    'VSTACK', 'HSTACK', 'TAKE', 'DROP',
-    'CHOOSEROWS', 'CHOOSECOLS', 'EXPAND', 'TOCOL', 'TOROW',
-    'WRAPCOLS', 'WRAPROWS',
-    # テキスト処理・正規表現関数
-    'ARRAYTOTEXT', 'VALUETOTEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTSPLIT',
-    'REGEXEXTRACT', 'REGEXREPLACE', 'REGEXTEST',
-    # LAMBDA関連
-    'LAMBDA', 'LET',
-    # LAMBDAを使う各種関数
-    'ISOMITTED', 'MAP', 'REDUCE', 'SCAN', 'BYCOL', 'BYROW', 'MAKEARRAY',
-    # 集計・分析関数
-    'GROUPBY', 'PIVOTBY', 'PERCENTOF',
-    # その他の関数
-    'TRIMRANGE',
-    # 特殊記法変換関数
-    '_TRO_ALL', '_TRO_TRAILING', '_TRO_LEADING'
-}
-
-# 集計関数の引数位置（_xleta.プレフィックスが必要な位置）
-AGGREGATE_ARG_POSITIONS = {
-    'GROUPBY': 3,  # 3番目の引数
-    'PIVOTBY': 4,  # 4番目の引数
-}
-
-# _xleta.プレフィックスが不要な関数（LAMBDAのみ）
-NO_XLETA_FUNCTIONS = {'LAMBDA'}
+from typing import Optional, Tuple, Dict, List, Any
+import uuid
 
 
-def _convert_tro_notations(formula_text):
+def prepare_spill_formula(formula: str, cell: Any) -> Tuple[str, Dict[str, Any]]:
     """
-    セル範囲の特殊表記（.:.、:.、.:）を対応する関数に変換
-    
-    変換ルール：
-    - A1.:.B10 → _TRO_ALL(A1:B10)
-    - A1:.B10  → _TRO_TRAILING(A1:B10)
-    - A1.:B10  → _TRO_LEADING(A1:B10)
+    Process Excel 365 spill formulas and add appropriate prefixes
     
     Args:
-        formula_text: 数式テキスト（'='なし）
+        formula: Excel formula string (starting with '=')
+        cell: Cell object where the formula will be set
     
     Returns:
-        str: 変換後の数式
+        tuple: (converted formula string, attribute dictionary)
     """
-    import re
+    if not formula or not formula.startswith('='):
+        return formula, {}
     
-    # パターン: セル/列/行参照 + 特殊記法 + セル/列/行参照
-    # 例: A1.:.B10, A.:.B, 1.:.10, Sheet1!A1:.B10 など
-    # セル参照: [A-Z]+[0-9]+ (例: A1, AB123)
-    # 列参照: [A-Z]+ (例: A, AB)
-    # 行参照: [0-9]+ (例: 1, 123)
-    # 絶対参照も考慮: $ 付き
-    cell_pattern = r'([A-Z]+[0-9]+|[A-Z]+\$[0-9]+|\$[A-Z]+[0-9]+|\$[A-Z]+\$[0-9]+|[A-Z]+|\$[A-Z]+|[0-9]+|\$[0-9]+)'
-    pattern = cell_pattern + r'(\.:\.|:\.|\.:)' + cell_pattern
-    
-    def replace_notation(match):
-        start_cell = match.group(1)
-        notation = match.group(2)
-        end_cell = match.group(3)
+    try:
+        # Get formula body (excluding '=')
+        formula_body = formula[1:]
         
-        # 通常のコロン範囲
-        cell_range = f'{start_cell}:{end_cell}'
+        # 1. Protect string literals
+        protected_formula, string_map = _protect_string_literals(formula_body)
         
-        if notation == '.:.':
-            return f'_TRO_ALL({cell_range})'
-        elif notation == ':.':
-            return f'_TRO_TRAILING({cell_range})'
-        elif notation == '.:':
-            return f'_TRO_LEADING({cell_range})'
-    
-    # シート参照も含むパターン
-    sheet_cell_pattern = r'([A-Z]+[0-9]+|[A-Z]+\$[0-9]+|\$[A-Z]+[0-9]+|\$[A-Z]+\$[0-9]+|[A-Z]+|\$[A-Z]+|[0-9]+|\$[0-9]+)'
-    sheet_pattern = r'([A-Za-z0-9_]+!)' + sheet_cell_pattern + r'(\.:\.|:\.|\.:)' + sheet_cell_pattern
-    
-    def replace_sheet_notation(match):
-        sheet = match.group(1)
-        start_cell = match.group(2)
-        notation = match.group(3)
-        end_cell = match.group(4)
+        # 2. LAMBDA/LET unified processing (highest priority)
+        processed_formula = _process_lambda_let_unified(protected_formula)
         
-        # 通常のコロン範囲
-        cell_range = f'{sheet}{start_cell}:{sheet}{end_cell}'
+        # 3. GROUPBY/PIVOTBY argument processing
+        processed_formula = _process_groupby_pivotby_args(processed_formula)
         
-        if notation == '.:.':
-            return f'_TRO_ALL({cell_range})'
-        elif notation == ':.':
-            return f'_TRO_TRAILING({cell_range})'
-        elif notation == '.:':
-            return f'_TRO_LEADING({cell_range})'
+        # 4. Function name conversion
+        processed_formula = _add_function_prefixes(processed_formula)
+        
+        # 5. Special notation conversion
+        processed_formula = _convert_tro_notations(processed_formula)
+        
+        # 6. Restore string literals
+        final_formula = _restore_string_literals(processed_formula, string_map)
+        
+        # 7. Attribute setting
+        attributes = _determine_formula_attributes(final_formula, cell)
+        
+        # Return with '=' prefix
+        return '=' + final_formula, attributes
+        
+    except Exception:
+        # Return original formula and empty attributes on error
+        return formula, {}
+
+
+def _protect_string_literals(formula: str) -> Tuple[str, Dict[str, str]]:
+    """
+    Temporarily replace string literals with placeholders
     
-    # まずシート参照付きを変換
-    result = re.sub(sheet_pattern, replace_sheet_notation, formula_text)
-    # 次に通常のセル参照を変換
-    result = re.sub(pattern, replace_notation, result)
+    Args:
+        formula: Formula string to process
     
+    Returns:
+        (Formula with placeholders, mapping of placeholders to original strings)
+    """
+    string_map = {}
+    
+    def replace_string(match):
+        # Generate unique placeholder
+        placeholder = f"__STR_{uuid.uuid4().hex[:8]}__"
+        string_map[placeholder] = match.group(0)
+        return placeholder
+    
+    # Replace double-quoted strings
+    protected = re.sub(r'"(?:[^"]|"")*"', replace_string, formula)
+    
+    return protected, string_map
+
+
+def _restore_string_literals(formula: str, string_map: Dict[str, str]) -> str:
+    """
+    Restore placeholders to original string literals
+    
+    Args:
+        formula: Formula with placeholders
+        string_map: Mapping of placeholders to original strings
+    
+    Returns:
+        Formula with restored string literals
+    """
+    result = formula
+    for placeholder, original in string_map.items():
+        result = result.replace(placeholder, original)
     return result
 
 
-def _add_function_prefix(formula_text):
+def _process_lambda_let_unified(formula: str, scope: Optional[Dict[str, str]] = None) -> str:
     """
-    通常の数式内の新関数に_xlfn.プレフィックスを追加する
-    
-    この関数は数式全体を処理し：
-    1. LAMBDA/LET関数の特殊処理を_process_lambda_function関数に委譲
-    2. その他のExcel 365新関数に_xlfn.プレフィックスを追加
-    3. SORT/FILTER関数には追加で_xlws.プレフィックスも付与
-    
-    処理の順序が重要：
-    - LAMBDA/LET関数を先に処理（引数に_xlpm.プレフィックスが必要なため）
-    - その後、他の新関数を処理
-    
-    ## 処理ロジックの概略
-    
-    1. **関数名の検出**: 正規表現の単語境界（\b）を使用して関数名を正確に識別
-    2. **プレフィックス追加**: 
-       - 通常の新関数: 関数名の前に `_xlfn.` を追加
-       - LAMBDA/LETのパラメータ: パラメータ名の前に `_xlpm.` を追加
-       - SORT/FILTER: `_xlfn._xlws.` という二重プレフィックスを使用
-    3. **括弧の対応処理**: カンマ区切りの引数解析時、括弧の入れ子を正しく処理
-    4. **再帰的処理**: ネストしたLAMBDA関数は内側から外側へ処理
-    
-    ## 対応できていないケース
-    
-    1. **文字列内の関数名**:
-       - 例: `=CONCATENATE("LAMBDA", "(x,x)")` → LAMBDAが誤って置換される
-       - 文字列リテラル内の内容は考慮していない
-    
-    2. **コメント内の関数名**:
-       - Excelの数式にコメントがある場合、その中の関数名も置換される可能性
-    
-    3. **極めて深いネスト**:
-       - LAMBDA関数が10レベル以上ネストしている場合、処理が不完全になる可能性
-    
-    4. **不正な構文**:
-       - 括弧の対応が取れていない数式では、予期しない動作をする可能性
-       - 例: `=LAMBDA(x,x+1` （閉じ括弧なし）
-    
-    5. **動的な関数名**:
-       - INDIRECT関数などで動的に生成される関数名は処理できない
-       - 例: `=INDIRECT("LAM" & "BDA")`
-    
-    6. **名前付き範囲内の数式**:
-       - ワークブックレベルの名前付き範囲に含まれる数式は、このモジュールでは処理されない
-    
-    呼び出しフロー:
-    ```
-    add_function_prefix (エントリーポイント)
-      └── _process_lambda_function (LAMBDA/LET専用の処理)
-            ├── _add_xlpm_to_lambda_params (LAMBDA引数の処理)
-            └── _process_let_variables (LET変数の処理)
-                  └── _add_xlpm_to_let_vars (LET引数の処理)
-    ```
-    
-    外部から呼ばれる場所:
-    - _prepare_spill_formula: スピル数式の処理時
-    - etree_write_cell: 通常の数式書き込み時
-    - lxml_write_cell: LXML使用時の数式書き込み時
+    Unified processing of LAMBDA/LET function variables/parameters
     
     Args:
-        formula_text: 数式テキスト（"=UPPER(TEXTBEFORE(B2,"@"))"）
+        formula: Formula string to process
+        scope: Current scope (mapping of variable names to their prefixes)
     
     Returns:
-        str: プレフィックスが追加された数式
+        Formula with processed variables/parameters
     """
-    if not formula_text or not formula_text.startswith('='):
-        return formula_text
-    
-    # =を一時的に削除
-    formula_without_eq = formula_text[1:]
-    
-    # 特殊記法を変換（.:.、:.、.:）
-    formula_without_eq = _convert_tro_notations(formula_without_eq)
-    
-    # 新関数にプレフィックスを追加
-    
-    # LAMBDA関数の特殊処理を先に行う
-    formula_without_eq = _process_lambda_function(formula_without_eq)
-    
-    # その他の新関数にプレフィックスを追加
-    for func in EXCEL_NEW_FUNCTIONS:
-        if func in ['LAMBDA', 'LET']:  # LAMBDAとLETは既に処理済み
-            continue
-        # 単語境界を使って関数名を正確にマッチング
-        pattern = r'\b' + func + r'\b'
-        # _xlfn.または_xlws.が既に付いていない場合のみ追加
-        if not re.search(r'(_xlfn\.|_xlws\.)' + func, formula_without_eq):
-            formula_without_eq = re.sub(pattern, '_xlfn.' + func, formula_without_eq)
-    
-    # SORT関数とFILTER関数の特殊ケース（_xlwsプレフィックスが必要）
-    # すでに_xlws.が付いている場合は追加しない
-    if not re.search(r'_xlfn\._xlws\.SORT', formula_without_eq):
-        formula_without_eq = re.sub(r'_xlfn\.SORT\b', '_xlfn._xlws.SORT', formula_without_eq)
-    if not re.search(r'_xlfn\._xlws\.FILTER', formula_without_eq):
-        formula_without_eq = re.sub(r'_xlfn\.FILTER\b', '_xlfn._xlws.FILTER', formula_without_eq)
-    
-    # GROUPBY、PIVOTBY、PERCENTOF内の集計関数に_xleta.プレフィックスを追加
-    formula_without_eq = _add_xleta_to_aggregate_functions(formula_without_eq)
-    
-    return '=' + formula_without_eq
-
-
-def _process_lambda_function(formula_text):
-    """
-    LAMBDA関数とLET関数を処理し、適切なプレフィックスを追加する
-    
-    この関数は以下の処理を行う：
-    1. LAMBDA → _xlfn.LAMBDA への変換
-    2. LET → _xlfn.LET への変換
-    3. 各LAMBDA関数の引数解析と_xlpm.プレフィックス付与
-    4. LET関数の変数解析と_xlpm.プレフィックス付与
-    
-    Args:
-        formula_text: 数式テキスト（'='なし）
-    
-    Returns:
-        str: プレフィックスが追加された数式
-    """
-    # 処理中のテキスト
-    processed_text = formula_text
-    
-    # LAMBDA関数を処理（最も内側から処理）
-    # まず、すべてのLAMBDA関数の位置を見つける
-    while True:
-        lambda_positions = []
-        # _xlfn.が付いていないLAMBDAのみを検索
-        for match in re.finditer(r'(?<!_xlfn\.)LAMBDA\s*\(', processed_text):
-            start = match.start()
-            end = match.end()
-            
-            # 対応する閉じ括弧を見つける
-            paren_count = 1
-            pos = end
-            in_string = False
-            quote_char = None
-            
-            while pos < len(processed_text) and paren_count > 0:
-                char = processed_text[pos]
-                
-                # 文字列リテラルの処理
-                if char in ['"', "'"] and (pos == 0 or processed_text[pos-1] != '\\'):
-                    if not in_string:
-                        in_string = True
-                        quote_char = char
-                    elif char == quote_char:
-                        in_string = False
-                        quote_char = None
-                
-                # 文字列外での括弧のカウント
-                if not in_string:
-                    if char == '(':
-                        paren_count += 1
-                    elif char == ')':
-                        paren_count -= 1
-                pos += 1
-            
-            if paren_count == 0:
-                lambda_positions.append((start, pos, pos - start))  # start, end, length
-        
-        if not lambda_positions:
-            break
-        
-        # 長さでソート（短いものから処理 = 内側から処理）
-        lambda_positions.sort(key=lambda x: x[2])
-        
-        # 最も内側のLAMBDAを処理
-        start, end, _ = lambda_positions[0]
-        lambda_expr = processed_text[start:end]
-        processed_expr = _add_xlpm_to_lambda_params(lambda_expr)
-        processed_text = processed_text[:start] + processed_expr + processed_text[end:]
-    
-    # LETを_xlfn.LETに置換
-    processed_text = re.sub(r'\bLET\b', '_xlfn.LET', processed_text)
-    
-    # LET関数内の変数を処理
-    processed_text = _process_let_variables(processed_text)
-    
-    return processed_text
-
-
-def _protect_string_literals(text):
-    """
-    文字列リテラルと配列リテラル内の内容を保護するため、一時的に置換する
-    
-    Args:
-        text: 処理対象のテキスト
-    
-    Returns:
-        tuple: (保護済みテキスト, 保護したリテラルのリスト)
-    """
-    import re
-    
-    literals = []
-    protected = text
-    
-    # 配列リテラル（波括弧内）を検出して保護
-    array_pattern = r'\{[^\}]*\}'
-    array_matches = list(re.finditer(array_pattern, text))
-    
-    # 後ろから置換（インデックスがずれないように）
-    for match in reversed(array_matches):
-        array_content = match.group(0)
-        placeholder = f'__ARRAY_{len(literals)}__'
-        literals.insert(0, array_content)
-        protected = protected[:match.start()] + placeholder + protected[match.end():]
-    
-    # ダブルクォートで囲まれた文字列を検出
-    string_pattern = r'"([^"]*)"'
-    string_matches = list(re.finditer(string_pattern, protected))
-    
-    # 後ろから置換（インデックスがずれないように）
-    for match in reversed(string_matches):
-        string_content = match.group(0)
-        placeholder = f'__STRING_{len(literals)}__'
-        literals.insert(0, string_content)
-        protected = protected[:match.start()] + placeholder + protected[match.end():]
-    
-    return protected, literals
-
-def _restore_string_literals(text, literals):
-    """
-    保護した文字列リテラルと配列リテラルを元に戻す
-    
-    Args:
-        text: 保護済みテキスト
-        literals: 保護したリテラルのリスト
-    
-    Returns:
-        str: 復元されたテキスト
-    """
-    restored = text
-    for i, literal_content in enumerate(literals):
-        # 文字列リテラルのプレースホルダ
-        string_placeholder = f'__STRING_{i}__'
-        restored = restored.replace(string_placeholder, literal_content)
-        
-        # 配列リテラルのプレースホルダ
-        array_placeholder = f'__ARRAY_{i}__'
-        restored = restored.replace(array_placeholder, literal_content)
-    
-    return restored
-
-def _add_xlpm_to_lambda_params(lambda_expr):
-    """
-    LAMBDA式のパラメータに_xlpm.または_xlop.プレフィックスを追加
-    
-    この関数はLAMBDA関数の引数部分を解析し：
-    1. カンマで区切られた引数リストを解析（括弧の入れ子を考慮）
-    2. 最後の要素を式、それ以前をパラメータとして分離
-    3. 各パラメータ名に適切なプレフィックスを追加
-       - 通常のパラメータ: _xlpm.
-       - オプショナルパラメータ（[]で囲まれた）: _xlop.
-    4. 式内のパラメータ参照も同様に置換
-    5. 式内の他の新関数（SEQUENCE等）にも適切なプレフィックスを付与
-    
-    Args:
-        lambda_expr: "LAMBDA(x,[y],x+y)"のようなLAMBDA式
-    
-    Returns:
-        str: "_xlfn.LAMBDA(_xlpm.x,_xlop.y,_xlpm.x+_xlpm.y)"
-    """
-    # LAMBDA(の後の内容を抽出
-    match = re.match(r'(.*?LAMBDA\s*\()(.+)(\))', lambda_expr)
-    if not match:
-        return lambda_expr
-    
-    prefix = match.group(1)
-    content = match.group(2)
-    suffix = match.group(3)
-    
-    # カンマで分割（括弧、波括弧、文字列リテラル内のカンマは無視）
-    parts = []
-    current = ""
-    paren_depth = 0
-    brace_depth = 0
-    in_string = False
-    quote_char = None
-    
-    for i, char in enumerate(content):
-        # 文字列リテラルの開始・終了を検出
-        if char in ['"', "'"] and (i == 0 or content[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                quote_char = char
-            elif char == quote_char:
-                in_string = False
-                quote_char = None
-        
-        # 文字列リテラル内でない場合のみ括弧をカウント
-        if not in_string:
-            if char == '(':
-                paren_depth += 1
-            elif char == ')':
-                paren_depth -= 1
-            elif char == '{':
-                brace_depth += 1
-            elif char == '}':
-                brace_depth -= 1
-            elif char == ',' and paren_depth == 0 and brace_depth == 0:
-                parts.append(current.strip())
-                current = ""
-                continue
-        current += char
-    
-    if current:
-        parts.append(current.strip())
-    
-    # LAMBDAは最後の要素が式、それ以前がパラメータ
-    if len(parts) < 2:
-        return lambda_expr
-    
-    params = parts[:-1]
-    expression = parts[-1]
-    
-    # パラメータに適切なプレフィックスを追加
-    processed_params = []
-    param_names = []
-    
-    for param in params:
-        # パラメータ名を抽出（空白を除去）
-        param_str = param.strip()
-        
-        # オプショナルパラメータ（[]で囲まれた）かチェック
-        if param_str.startswith('[') and param_str.endswith(']'):
-            # オプショナルパラメータ
-            param_name = param_str[1:-1].strip()
-            processed_params.append('_xlop.' + param_name)
-            param_names.append(param_name)
-        else:
-            # 通常のパラメータ
-            param_name = param_str
-            processed_params.append('_xlpm.' + param_name)
-            param_names.append(param_name)
-    
-    # 式内のパラメータ参照も置換（文字列リテラル内は除外）
-    processed_expr = _replace_var_refs_outside_strings(expression, param_names)
-    
-    # 式内の他の新関数にもプレフィックスを追加（既に_xlfn.が付いていない場合のみ）
-    for func_name in EXCEL_NEW_FUNCTIONS:
-        if func_name != 'LAMBDA' and func_name != 'LET':  # LAMBDAとLETは別処理
-            processed_expr = re.sub(r'\b' + re.escape(func_name) + r'\(', '_xlfn.' + func_name + '(', processed_expr)
-    
-    # 再構築
-    # prefixに既に_xlfn.が含まれているかチェック
-    if '_xlfn.LAMBDA' in prefix:
-        result = prefix + ','.join(processed_params + [processed_expr]) + suffix
-    else:
-        result = prefix.replace('LAMBDA', '_xlfn.LAMBDA') + ','.join(processed_params + [processed_expr]) + suffix
-    return result
-
-
-def _process_let_variables(formula_text):
-    """
-    LET関数内の変数定義と参照を処理
-    
-    この関数は数式内のすべてのLET関数を見つけて：
-    1. LET関数の開始位置と対応する閉じ括弧を特定
-    2. 各LET関数を_add_xlpm_to_let_vars関数で処理
-    3. 処理済みのLET関数で元の式を置換
-    
-    括弧の入れ子を正しく処理し、ネストしたLET関数にも対応する。
-    
-    Args:
-        formula_text: 数式テキスト
-    
-    Returns:
-        str: 処理済みの数式
-    """
-    # LET関数を見つける
-    let_pattern = r'_xlfn\.LET\s*\('
-    
-    # すべてのLET関数を処理
-    result = formula_text
-    start = 0
-    
-    while True:
-        match = re.search(let_pattern, result[start:])
-        if not match:
-            break
-        
-        # LET関数の開始位置
-        let_start = start + match.start()
-        let_end = let_start + len('_xlfn.LET(')
-        
-        # 対応する閉じ括弧を見つける
-        paren_count = 1
-        pos = let_end
-        
-        while pos < len(result) and paren_count > 0:
-            if result[pos] == '(':
-                paren_count += 1
-            elif result[pos] == ')':
-                paren_count -= 1
-            pos += 1
-        
-        if paren_count == 0:
-            # LET関数全体を抽出
-            let_expr = result[let_start:pos]
-            # 処理
-            processed = _add_xlpm_to_let_vars(let_expr)
-            # 置換
-            result = result[:let_start] + processed + result[pos:]
-            start = let_start + len(processed)
-        else:
-            # 対応する括弧が見つからない場合はスキップ
-            start = let_end
-    
-    return result
-
-
-def _replace_var_refs_outside_strings(text, var_names):
-    """
-    文字列リテラル外の変数参照のみを置換する
-    
-    Args:
-        text: 置換対象のテキスト
-        var_names: 置換する変数名のリスト
-    
-    Returns:
-        str: 変数参照が置換されたテキスト
-    """
-    if not var_names:
-        return text
+    if scope is None:
+        scope = {}
     
     result = []
-    in_string = False
-    quote_char = None
     i = 0
     
-    while i < len(text):
-        char = text[i]
-        
-        # 文字列リテラルの開始・終了を検出
-        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                quote_char = char
-                result.append(char)
+    while i < len(formula):
+        # Detect LAMBDA function
+        if _is_function_at(formula, i, 'LAMBDA'):
+            result.append('_xlfn.LAMBDA')
+            i += 6  # Length of 'LAMBDA'
+            
+            # Parse arguments
+            if i < len(formula) and formula[i] == '(':
+                result.append('(')
                 i += 1
-                continue
-            elif char == quote_char:
-                in_string = False
-                quote_char = None
-                result.append(char)
-                i += 1
-                continue
-        
-        # 文字列リテラル内の場合はそのまま追加
-        if in_string:
-            result.append(char)
-            i += 1
-            continue
-        
-        # 文字列リテラル外で変数名をチェック
-        matched = False
-        for var_name in var_names:
-            # 単語境界をチェック
-            if text[i:i+len(var_name)] == var_name:
-                # 前後が単語構成文字でないことを確認
-                before_ok = i == 0 or not text[i-1].isalnum() and text[i-1] != '_'
-                after_ok = i+len(var_name) >= len(text) or not text[i+len(var_name)].isalnum() and text[i+len(var_name)] != '_'
                 
-                if before_ok and after_ok:
-                    result.append('_xlpm.' + var_name)
-                    i += len(var_name)
-                    matched = True
-                    break
-        
-        if not matched:
-            result.append(char)
+                # Parse and process LAMBDA content
+                params, body, end_pos = _parse_lambda_content(formula[i:])
+                
+                # Create new scope
+                new_scope = scope.copy()
+                
+                # Process parameters
+                processed_params = []
+                for param in params:
+                    param = param.strip()
+                    if param:
+                        # Check if optional parameter (with brackets)
+                        if param.startswith('[') and param.endswith(']'):
+                            # Remove brackets for optional parameters
+                            clean_param = param[1:-1]
+                            # Use _xlop. prefix for parameter definition, but _xlpm. for scope references
+                            new_scope[clean_param] = f'_xlpm.{clean_param}'
+                            processed_params.append(f'_xlop.{clean_param}')
+                        else:
+                            # Regular parameter with _xlpm. prefix
+                            new_scope[param] = f'_xlpm.{param}'
+                            processed_params.append(f'_xlpm.{param}')
+                
+                # Add parameter part to result
+                if processed_params:
+                    result.append(','.join(processed_params))
+                    if body:
+                        result.append(',')
+                
+                # Process body with new scope
+                if body:
+                    processed_body = _process_lambda_let_unified(body, new_scope)
+                    # Replace variables in scope
+                    processed_body = _replace_variables_in_scope(processed_body, new_scope)
+                    result.append(processed_body)
+                
+                result.append(')')
+                i += end_pos + 1
+                
+        # Detect LET function
+        elif _is_function_at(formula, i, 'LET'):
+            result.append('_xlfn.LET')
+            i += 3  # Length of 'LET'
+            
+            # Parse arguments
+            if i < len(formula) and formula[i] == '(':
+                result.append('(')
+                i += 1
+                
+                # Parse and process LET content
+                var_pairs, final_expr, end_pos = _parse_let_content(formula[i:])
+                
+                # Create new scope (built incrementally for forward reference constraint)
+                new_scope = scope.copy()
+                processed_parts = []
+                
+                # Process variable definitions in order
+                for var_name, var_expr in var_pairs:
+                    var_name = var_name.strip()
+                    if var_name:
+                        # Process variable expression with current scope
+                        processed_expr = _process_lambda_let_unified(var_expr, new_scope)
+                        processed_expr = _replace_variables_in_scope(processed_expr, new_scope)
+                        
+                        # Add prefix to variable name and add to scope
+                        prefixed_name = f'_xlpm.{var_name}'
+                        new_scope[var_name] = prefixed_name
+                        
+                        # Add processed variable definition
+                        processed_parts.append(prefixed_name)
+                        processed_parts.append(processed_expr)
+                
+                # Process final expression
+                if final_expr:
+                    # First process nested LAMBDA/LET functions
+                    processed_final = _process_lambda_let_unified(final_expr, new_scope)
+                    # Then replace variables in the processed result
+                    # The processed_final might have introduced new LAMBDA/LET that need variable replacement
+                    processed_final = _replace_variables_in_scope(processed_final, new_scope)
+                    processed_parts.append(processed_final)
+                
+                # Combine results
+                result.append(','.join(processed_parts))
+                result.append(')')
+                i += end_pos + 1
+                
+        else:
+            # Add regular character
+            result.append(formula[i])
             i += 1
     
     return ''.join(result)
 
-def _add_xleta_to_aggregate_functions(formula_text):
+
+def _is_function_at(formula: str, pos: int, func_name: str) -> bool:
     """
-    GROUPBY、PIVOTBYの特定の引数位置にある集計関数に_xleta.プレフィックスを追加
-    
-    - GROUPBY: 3番目の引数
-    - PIVOTBY: 4番目の引数
+    Check if a specific function exists at the specified position
     
     Args:
-        formula_text: 数式テキスト
+        formula: Formula string
+        pos: Check position
+        func_name: Function name
     
     Returns:
-        str: 処理済みの数式
+        True if function exists
     """
-    result = formula_text
+    # Check if position is out of range
+    if pos >= len(formula) or pos + len(func_name) > len(formula):
+        return False
     
-    # GROUPBYとPIVOTBYを処理
-    for func_name, target_arg_pos in AGGREGATE_ARG_POSITIONS.items():
-        # _xlfn.付きの関数を探す
-        pattern = r'_xlfn\.' + func_name + r'\s*\('
+    # Check if function name matches
+    if formula[pos:pos + len(func_name)].upper() != func_name.upper():
+        return False
+    
+    # Check that previous character is not part of a word
+    if pos > 0:
+        prev_char = formula[pos - 1]
+        if prev_char.isalnum() or prev_char == '_' or prev_char == '.':
+            return False
+    
+    # Check that next character is '('
+    next_pos = pos + len(func_name)
+    if next_pos < len(formula) and formula[next_pos] == '(':
+        return True
+    
+    return False
+
+
+def _parse_lambda_content(formula: str) -> Tuple[List[str], str, int]:
+    """
+    Parse LAMBDA function arguments and body
+    
+    Args:
+        formula: LAMBDA function content inside parentheses (excluding parentheses)
+    
+    Returns:
+        (parameter list, body expression, end position)
+    """
+    args = []
+    depth = 0
+    current = []
+    i = 0
+    
+    while i < len(formula):
+        char = formula[i]
         
-        # すべての該当箇所を処理
-        pos = 0
-        while True:
-            match = re.search(pattern, result[pos:])
-            if not match:
+        if char == '(':
+            depth += 1
+            current.append(char)
+        elif char == ')':
+            if depth == 0:
+                # Add last argument
+                if current:
+                    args.append(''.join(current).strip())
                 break
-                
-            # 関数の開始位置
-            func_start = pos + match.start()
-            func_end = pos + match.end()
+            else:
+                depth -= 1
+                current.append(char)
+        elif char == ',' and depth == 0:
+            # Argument separator
+            if current:
+                args.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        
+        i += 1
+    
+    # Split into parameters and body
+    # The last argument is always the body expression
+    if len(args) > 1:
+        params = args[:-1]
+        body = args[-1]
+    elif len(args) == 1:
+        # Single argument - it's the body with no parameters
+        params = []
+        body = args[0]
+    else:
+        params = []
+        body = ''
+    
+    return params, body, i
+
+
+def _looks_like_parameter(text: str) -> bool:
+    """
+    Check if text looks like a parameter name
+    
+    Args:
+        text: Text to check
+    
+    Returns:
+        True if it looks like a parameter name
+    """
+    # Parameters are usually simple identifiers
+    # They don't contain function calls or operators
+    if '(' in text[:20] or '+' in text[:20] or '-' in text[:20]:
+        return False
+    
+    # Check if first part matches identifier pattern
+    match = re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*', text)
+    if match:
+        # Check if comma or closing parenthesis follows the identifier
+        end_pos = match.end()
+        if end_pos < len(text):
+            next_char = text[end_pos:].lstrip()
+            if next_char and next_char[0] in ',)':
+                return True
+    
+    return False
+
+
+def _parse_let_content(formula: str) -> Tuple[List[Tuple[str, str]], str, int]:
+    """
+    Parse LET function variable definitions and final expression
+    
+    Args:
+        formula: LET function content inside parentheses (excluding parentheses)
+    
+    Returns:
+        (list of variable definitions [(name, value expression),...], final expression, end position)
+    """
+    var_pairs = []
+    paren_depth = 0
+    brace_depth = 0
+    current = []
+    i = 0
+    args = []
+    
+    # Split all arguments
+    while i < len(formula):
+        char = formula[i]
+        
+        if char == '(':
+            paren_depth += 1
+            current.append(char)
+        elif char == ')':
+            if paren_depth == 0:
+                # Add last argument
+                if current:
+                    args.append(''.join(current).strip())
+                    current = []  # Clear current to avoid double-adding
+                break
+            else:
+                paren_depth -= 1
+                current.append(char)
+        #TODO: { }は、処理には影響はしないはず。文字列のように、ここだけ別処理で除外しても良いかもしれない
+        elif char == '{':
+            brace_depth += 1
+            current.append(char)
+        elif char == '}':
+            brace_depth -= 1
+            current.append(char)
+        elif char == ',' and paren_depth == 0 and brace_depth == 0:
+            # Argument separator (only when not inside parentheses or braces)
+            if current:
+                args.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        
+        i += 1
+    
+    # Add last argument if there's any remaining content
+    if current:
+        args.append(''.join(current).strip())
+    
+    # Split arguments into pairs (last one is final expression)
+    # LET has an odd number of arguments: pairs of (name, value) plus final expression
+    # So we pair up all arguments except the last one if there's an odd count
+    num_args = len(args)
+    # TODO: この条件分岐（とその内部）は冗長な気がするので後で考える
+    if num_args % 2 == 1:
+        # Odd number of arguments - last one is the final expression
+        for j in range(0, num_args - 1, 2):
+            if j + 1 < num_args - 1:
+                var_pairs.append((args[j], args[j + 1]))
+            elif j < num_args - 1:
+                # This handles the case where we have exactly one var-value pair
+                var_pairs.append((args[j], args[j + 1]))
+    else:
+        # Even number of arguments - all are variable pairs
+        for j in range(0, num_args, 2):
+            if j + 1 < num_args:
+                var_pairs.append((args[j], args[j + 1]))
+    
+    # Final expression
+    final_expr = args[-1] if len(args) % 2 == 1 else ''
+    
+    return var_pairs, final_expr, i
+
+
+def _replace_variables_in_scope(expr: str, scope: Dict[str, str]) -> str:
+    """
+    Replace variable references in expression based on scope
+    
+    Args:
+        expr: Expression to process
+        scope: Current scope
+    
+    Returns:
+        Expression with replaced variables
+    """
+    if not scope:
+        return expr
+    
+    result = expr
+    
+    # Replace each variable in scope
+    for var_name, prefixed_name in scope.items():
+        # Skip if variable name is a pure number (e.g., "2", "4")
+        # This can happen with malformed variable names
+        if var_name.isdigit():
+            continue
             
-            # 対応する閉じ括弧を見つける
-            paren_count = 1
-            current_pos = func_end
-            func_close_pos = func_end
-            
-            while current_pos < len(result) and paren_count > 0:
-                if result[current_pos] == '(':
-                    paren_count += 1
-                elif result[current_pos] == ')':
-                    paren_count -= 1
-                    if paren_count == 0:
-                        func_close_pos = current_pos
-                current_pos += 1
-            
-            if paren_count == 0:
-                # 関数の引数部分全体
-                args_text = result[func_end:func_close_pos]
-                
-                # 引数を解析してターゲット位置を見つける
-                arg_positions = _find_argument_positions(args_text)
-                
-                if len(arg_positions) >= target_arg_pos:
-                    # ターゲット引数の開始と終了位置
-                    arg_start, arg_end = arg_positions[target_arg_pos - 1]
-                    target_arg = args_text[arg_start:arg_end]
-                    
-                    # LAMBDA以外の場合のみ_xleta.を追加
-                    is_lambda = re.match(r'\s*_xlfn\.LAMBDA\s*\(', target_arg)
-                    
-                    if not is_lambda:
-                        # 関数名を抽出（_xlfn.プレフィックスも考慮）
-                        func_match = re.match(r'^(\s*)((?:_xlfn\.)?[A-Z]+)(\s*(?:\(.*\))?\s*)$', target_arg)
-                        if func_match:
-                            prefix_space = func_match.group(1)
-                            func_name_with_prefix = func_match.group(2)
-                            suffix = func_match.group(3)
-                            
-                            # 既に_xleta.が付いていない場合のみ追加
-                            if not re.search(r'_xleta\.', target_arg):
-                                # _xlfn.プレフィックスがある場合は置換
-                                if func_name_with_prefix.startswith('_xlfn.'):
-                                    func_name_only = func_name_with_prefix[6:]  # _xlfn.を除去
-                                    new_arg = prefix_space + '_xleta.' + func_name_only + suffix
-                                else:
-                                    new_arg = prefix_space + '_xleta.' + func_name_with_prefix + suffix
-                                
-                                # 元のテキストに置換を適用
-                                result = (result[:func_end + arg_start] + 
-                                         new_arg + 
-                                         result[func_end + arg_end:])
-                                
-                                # 次の検索位置を更新
-                                pos = func_end + arg_start + len(new_arg)
-                                continue
-            
-            pos = func_end
+        # Use negative lookbehind to avoid replacing already prefixed variables
+        # This pattern matches the variable name only when it's not preceded by '_xlpm.' or '_xlop.'
+        pattern = r'(?<!_xlpm\.)(?<!_xlop\.)\b' + re.escape(var_name) + r'\b'
+        result = re.sub(pattern, prefixed_name, result)
     
     return result
 
 
-def _find_argument_positions(text):
+def _process_groupby_pivotby_args(formula: str) -> str:
     """
-    関数の引数の開始と終了位置を返す
+    Process GROUPBY/PIVOTBY aggregate function arguments
     
     Args:
-        text: 関数の引数部分のテキスト（開き括弧の後から閉じ括弧の前まで）
+        formula: Formula string to process
     
     Returns:
-        list: 各引数の(開始位置, 終了位置)のタプルのリスト
+        Processed formula string
     """
-    positions = []
-    current_start = 0
-    paren_depth = 0
-    brace_depth = 0
-    in_string = False
-    quote_char = None
+    result = formula
     
-    for i, char in enumerate(text):
-        # 文字列リテラルの処理
-        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                quote_char = char
-            elif char == quote_char:
-                in_string = False
-                quote_char = None
+    # Process GROUPBY function (3rd argument)
+    result = _process_aggregate_function(result, 'GROUPBY', 2)
+    
+    # Process PIVOTBY function (4th argument)
+    result = _process_aggregate_function(result, 'PIVOTBY', 3)
+    
+    return result
+
+
+def _process_aggregate_function(formula: str, func_name: str, arg_index: int) -> str:
+    """
+    Process aggregate function argument of specified function
+    
+    Args:
+        formula: Formula string to process
+        func_name: Function name (GROUPBY or PIVOTBY)
+        arg_index: Argument index (0-based)
+    
+    Returns:
+        Processed formula string
+    """
+    pattern = r'\b' + func_name + r'\s*\('
+    matches = list(re.finditer(pattern, formula, re.IGNORECASE))
+    
+    # Process from back to front (to avoid position shifts)
+    for match in reversed(matches):
+        start_pos = match.end()
         
-        # 文字列外での括弧と波括弧のカウント
-        if not in_string:
-            if char == '(':
-                paren_depth += 1
-            elif char == ')':
-                paren_depth -= 1
-            elif char == '{':
-                brace_depth += 1
-            elif char == '}':
-                brace_depth -= 1
-            elif char == ',' and paren_depth == 0 and brace_depth == 0:
-                # 引数の終了位置を記録
-                positions.append((current_start, i))
-                current_start = i + 1
+        # Parse arguments
+        args = _split_function_args(formula, start_pos)
+        
+        if len(args) > arg_index:
+            arg_content = args[arg_index].strip()
+            
+            # Add _xleta. if not LAMBDA (check both original and processed forms)
+            if not arg_content.upper().startswith('LAMBDA') and not arg_content.startswith('_xlfn.LAMBDA'):
+                # Only add if prefix not already present
+                if not arg_content.startswith('_xleta.'):
+                    # Find argument position
+                    arg_start = start_pos
+                    for i in range(arg_index):
+                        arg_start = formula.find(',', arg_start) + 1
+                    
+                    # Skip spaces
+                    while arg_start < len(formula) and formula[arg_start].isspace():
+                        arg_start += 1
+                    
+                    # Add prefix
+                    formula = formula[:arg_start] + '_xleta.' + formula[arg_start:]
     
-    # 最後の引数
-    if current_start < len(text):
-        positions.append((current_start, len(text)))
-    
-    return positions
+    return formula
 
 
-def _parse_function_arguments(text):
+def _split_function_args(formula: str, start_pos: int) -> List[str]:
     """
-    関数の引数をカンマで分割（括弧の入れ子を考慮）
+    Split function arguments
     
     Args:
-        text: 関数の引数部分のテキスト（開き括弧の後から）
+        formula: Formula string
+        start_pos: Argument start position (after opening parenthesis)
     
     Returns:
-        list: 引数のリスト
+        List of arguments
     """
     args = []
-    current_arg = ""
-    paren_depth = 0
-    brace_depth = 0
-    in_string = False
-    quote_char = None
+    current = []
+    depth = 0
+    i = start_pos
     
-    for i, char in enumerate(text):
-        # 文字列リテラルの処理
-        if char in ['"', "'"] and (i == 0 or text[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                quote_char = char
-            elif char == quote_char:
-                in_string = False
-                quote_char = None
+    while i < len(formula):
+        char = formula[i]
         
-        # 文字列外での括弧と波括弧のカウント
-        if not in_string:
-            if char == '(':
-                paren_depth += 1
-            elif char == ')':
-                if paren_depth == 0:
-                    # 関数の終了
-                    if current_arg.strip():
-                        args.append(current_arg.strip())
-                    return args
-                paren_depth -= 1
-            elif char == '{':
-                brace_depth += 1
-            elif char == '}':
-                brace_depth -= 1
-            elif char == ',' and paren_depth == 0 and brace_depth == 0:
-                args.append(current_arg.strip())
-                current_arg = ""
-                continue
+        if char == '(':
+            depth += 1
+            current.append(char)
+        elif char == ')':
+            if depth == 0:
+                # Add last argument
+                if current:
+                    args.append(''.join(current))
+                break
+            else:
+                depth -= 1
+                current.append(char)
+        elif char == ',' and depth == 0:
+            # Argument separator
+            args.append(''.join(current))
+            current = []
+        else:
+            current.append(char)
         
-        current_arg += char
+        i += 1
     
     return args
 
 
-def _add_xlpm_to_let_vars(let_expr):
+def _add_function_prefixes(formula: str) -> str:
     """
-    LET式の変数に_xlpm.プレフィックスを追加
-    
-    この関数はLET関数の引数を解析し：
-    1. カンマで区切られた引数リストを解析（括弧の入れ子を考慮）
-    2. 変数名と値のペアを特定（最後の要素は最終式）
-    3. 各変数名に_xlpm.プレフィックスを追加
-    4. 変数の値内の既存変数参照も置換（前方参照のみ）
-    5. 最終式内のすべての変数参照を置換
-    
-    例：LET(x,5,y,x+10,x+y) → LET(_xlpm.x,5,_xlpm.y,_xlpm.x+10,_xlpm.x+_xlpm.y)
+    Add prefixes to Excel 365 new function names
     
     Args:
-        let_expr: "_xlfn.LET(x,5,y,10,x+y)"のようなLET式
+        formula: Formula string to process
     
     Returns:
-        str: "_xlfn.LET(_xlpm.x,5,_xlpm.y,10,_xlpm.x+_xlpm.y)"
+        Formula with prefixes added
     """
-    # LET(の後の内容を抽出
-    match = re.match(r'(_xlfn\.LET\s*\()(.+)(\)$)', let_expr)
-    if not match:
-        return let_expr
+    # Mapping of new functions and their prefixes
+    function_map = _get_new_function_list()
     
-    prefix = match.group(1)
-    content = match.group(2)
-    suffix = match.group(3)
+    result = formula
     
-    # カンマで分割（括弧、波括弧、文字列リテラル内のカンマは無視）
-    parts = []
-    current = ""
-    paren_depth = 0
-    brace_depth = 0
-    in_string = False
-    quote_char = None
-    
-    for i, char in enumerate(content):
-        # 文字列リテラルの開始・終了を検出
-        if char in ['"', "'"] and (i == 0 or content[i-1] != '\\'):
-            if not in_string:
-                in_string = True
-                quote_char = char
-            elif char == quote_char:
-                in_string = False
-                quote_char = None
+    # Replace each function name
+    for func_name, prefix in function_map.items():
+        # Skip if already has the prefix for this specific function
+        if prefix + func_name in result:
+            continue
         
-        # 文字列リテラル内でない場合のみ括弧をカウント
-        if not in_string:
-            if char == '(':
-                paren_depth += 1
-            elif char == ')':
-                paren_depth -= 1
-            elif char == '{':
-                brace_depth += 1
-            elif char == '}':
-                brace_depth -= 1
-            elif char == ',' and paren_depth == 0 and brace_depth == 0:
-                parts.append(current.strip())
-                current = ""
-                continue
-        current += char
+        # Use word boundaries to replace function names
+        # Exclude identifiers with _xlpm./_xlop./_xleta.
+        # Also exclude if already has _xlfn. prefix
+        pattern = r'(?<!_xlpm\.)(?<!_xlop\.)(?<!_xleta\.)(?<!_xlfn\.)\b' + func_name + r'(?=\s*\()'
+        replacement = prefix + func_name
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
     
-    if current:
-        parts.append(current.strip())
-    
-    # LETは変数名、値のペアが続き、最後に式
-    if len(parts) < 3 or len(parts) % 2 == 0:
-        return let_expr
-    
-    # 変数名を収集
-    var_names = []
-    processed_parts = []
-    
-    # 変数定義部分を処理（最後の要素以外）
-    for i in range(0, len(parts) - 1, 2):
-        var_name = parts[i].strip()
-        var_value = parts[i + 1] if i + 1 < len(parts) - 1 else ""
-        
-        var_names.append(var_name)
-        processed_parts.append('_xlpm.' + var_name)
-        
-        if var_value:
-            # 値の中の既存の変数参照も置換（文字列リテラル内は除外）
-            processed_value = _replace_var_refs_outside_strings(var_value, var_names[:-1])
-            processed_parts.append(processed_value)
-    
-    # 最後の式を処理
-    final_expr = parts[-1]
-    final_expr = _replace_var_refs_outside_strings(final_expr, var_names)
-    processed_parts.append(final_expr)
-    
-    # 再構築
-    result = prefix + ','.join(processed_parts) + suffix
     return result
 
 
-def prepare_spill_formula(formula_text, cell):
+def _get_new_function_list() -> Dict[str, str]:
     """
-    文字列の数式を適切な形式に変換する（スピル、LAMBDA/LET、通常の数式すべて）
-    必ず=で始まる値を返す（_writer.pyがvalue[1:]で削除するため）
-    
-    Args:
-        formula_text: 元の数式テキスト（文字列）
-        cell: Cellオブジェクト
+    Return mapping of Excel 365 new functions and their prefixes
     
     Returns:
-        tuple: (処理済み数式（=付き）, 属性辞書)
+        Dictionary of {function_name: prefix}
     """
-    # 文字列でない場合は、ダミーの=を付けて返す
-    if not isinstance(formula_text, str):
-        return "=", {}
+    return {
+        # Regular new functions (add _xlfn.)
+        'UNIQUE': '_xlfn.',
+        'SORTBY': '_xlfn.',
+        'SEQUENCE': '_xlfn.',
+        'RANDARRAY': '_xlfn.',
+        'XLOOKUP': '_xlfn.',
+        'XMATCH': '_xlfn.',
+        'VSTACK': '_xlfn.',
+        'HSTACK': '_xlfn.',
+        'TAKE': '_xlfn.',
+        'DROP': '_xlfn.',
+        'CHOOSEROWS': '_xlfn.',
+        'CHOOSECOLS': '_xlfn.',
+        'EXPAND': '_xlfn.',
+        'TOCOL': '_xlfn.',
+        'TOROW': '_xlfn.',
+        'WRAPCOLS': '_xlfn.',
+        'WRAPROWS': '_xlfn.',
+        'ARRAYTOTEXT': '_xlfn.',
+        'VALUETOTEXT': '_xlfn.',
+        'TEXTAFTER': '_xlfn.',
+        'TEXTBEFORE': '_xlfn.',
+        'TEXTSPLIT': '_xlfn.',
+        'REGEXEXTRACT': '_xlfn.',
+        'REGEXREPLACE': '_xlfn.',
+        'REGEXTEST': '_xlfn.',
+        'ISOMITTED': '_xlfn.',
+        'MAP': '_xlfn.',
+        'REDUCE': '_xlfn.',
+        'SCAN': '_xlfn.',
+        'BYCOL': '_xlfn.',
+        'BYROW': '_xlfn.',
+        'MAKEARRAY': '_xlfn.',
+        'PERCENTOF': '_xlfn.',
+        'TRIMRANGE': '_xlfn.',
+        'LAMBDA': '_xlfn.',
+        'LET': '_xlfn.',
+        'GROUPBY': '_xlfn.',
+        'PIVOTBY': '_xlfn.',
+        
+        # Special double prefix (add _xlfn._xlws.)
+        'SORT': '_xlfn._xlws.',
+        'FILTER': '_xlfn._xlws.',
+    }
+
+
+def _convert_tro_notations(formula: str) -> str:
+    """
+    Convert special cell range notations to corresponding function calls
     
-    # すべての数式に対してプレフィックスを追加
-    formula_text = _add_function_prefix(formula_text)
+    Args:
+        formula: Formula string to process
     
-    # =がない場合は追加（_writer.pyで[1:]されるため必須）
-    if not formula_text.startswith('='):
-        formula_text = '=' + formula_text
+    Returns:
+        Converted formula string
+    """
+    result = formula
     
-    # スピル数式の場合
-    if getattr(cell, "_is_spill", False):
-        # スピル数式の属性を設定
-        return formula_text, {
-            't': 'array',
-            'ref': getattr(cell, '_spill_range', None) or cell.coordinate
-        }
+    # Cell reference pattern - support cells, columns, rows
+    cell_pattern = r'(\$?[A-Z]+\$?\d+|\$?[A-Z]+|\$?\d+)'
+    sheet_pattern = r'([A-Za-z_][\w\.]*!)?'
     
-    # LAMBDA/LET関数の場合（配列式として扱う）
-    elif 'LAMBDA' in formula_text or 'LET' in formula_text:
-        # 配列式の属性を設定
-        return formula_text, {
-            't': 'array',
-            'ref': cell.coordinate
-        }
+    # .:. -> _xlfn._TRO_ALL
+    pattern_all = sheet_pattern + cell_pattern + r'\.:\.' + cell_pattern
+    result = re.sub(pattern_all, lambda m: _convert_tro_match(m, '_xlfn._TRO_ALL'), result)
     
-    # 通常の数式
-    return formula_text, {}
+    # :. -> _xlfn._TRO_TRAILING  
+    pattern_trailing = sheet_pattern + cell_pattern + r':\.' + cell_pattern
+    result = re.sub(pattern_trailing, lambda m: _convert_tro_match(m, '_xlfn._TRO_TRAILING'), result)
+    
+    # .: -> _xlfn._TRO_LEADING
+    pattern_leading = sheet_pattern + cell_pattern + r'\.:' + cell_pattern
+    result = re.sub(pattern_leading, lambda m: _convert_tro_match(m, '_xlfn._TRO_LEADING'), result)
+    
+    return result
+
+
+def _convert_tro_match(match: re.Match, func_name: str) -> str:
+    """
+    Convert TRO notation match to function call
+    
+    Args:
+        match: Regular expression match object
+        func_name: Target function name
+    
+    Returns:
+        Converted function call string
+    """
+    groups = match.groups()
+    
+    # Get sheet name
+    sheet = groups[0] if groups[0] else ''
+    
+    # Get cell references
+    if len(groups) >= 3:
+        cell1 = groups[1]
+        cell2 = groups[2]
+    else:
+        # Return original string if pattern doesn't match
+        return match.group(0)
+    
+    # Convert to function call format
+    if sheet:
+        # For sheet names, add sheet name to both cells
+        sheet_name = sheet.rstrip('!')
+        return f'{func_name}({sheet_name}!{cell1}:{sheet_name}!{cell2})'
+    else:
+        return f'{func_name}({cell1}:{cell2})'
+
+
+def _determine_formula_attributes(formula: str, cell: Any) -> Dict[str, Any]:
+    """
+    Determine formula type and generate appropriate array formula attributes
+    
+    Args:
+        formula: Processed formula string
+        cell: Cell object where the formula will be set
+    
+    Returns:
+        Attribute dictionary
+    """
+    # Determine if spill formula
+    if hasattr(cell, '_is_spill') and cell._is_spill:
+        # Get spill range
+        spill_range = _get_spill_range(cell)
+        return {'t': 'array', 'ref': spill_range}
+    
+    # Determine if contains LAMBDA/LET
+    if '_xlfn.LAMBDA' in formula or '_xlfn.LET' in formula:
+        # Get cell coordinate
+        cell_ref = _get_cell_coordinate(cell)
+        return {'t': 'array', 'ref': cell_ref}
+    
+    # Regular formula
+    return {}
+
+
+def _get_spill_range(cell: Any) -> str:
+    """
+    Get cell's spill range
+    
+    Args:
+        cell: Cell containing spill formula
+    
+    Returns:
+        String representation of spill range (e.g., "A1:C3")
+    """
+    # Get spill range from cell object
+    if hasattr(cell, '_spill_range') and cell._spill_range is not None:
+        return cell._spill_range
+    
+    # Default to cell's own coordinate
+    return _get_cell_coordinate(cell)
+
+
+def _get_cell_coordinate(cell: Any) -> str:
+    """
+    Get cell coordinate
+    
+    Args:
+        cell: Cell object
+    
+    Returns:
+        String representation of cell coordinate (e.g., "A1")
+    """
+    if hasattr(cell, 'coordinate'):
+        return cell.coordinate
+    
+    # Default coordinate
+    return "A1"
