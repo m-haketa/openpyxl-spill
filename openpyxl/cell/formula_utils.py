@@ -31,22 +31,28 @@ def prepare_spill_formula(formula: str, cell: Any) -> Tuple[str, Dict[str, Any]]
         # 1. Protect string literals
         protected_formula, string_map = _protect_string_literals(formula_body)
         
-        # 2. LAMBDA/LET unified processing (highest priority)
+        # 2. Protect array literals
+        protected_formula, array_map = _protect_array_literals(protected_formula)
+        
+        # 3. LAMBDA/LET unified processing (highest priority)
         processed_formula = _process_lambda_let_unified(protected_formula)
         
-        # 3. GROUPBY/PIVOTBY argument processing
+        # 4. GROUPBY/PIVOTBY argument processing
         processed_formula = _process_groupby_pivotby_args(processed_formula)
         
-        # 4. Function name conversion
+        # 5. Function name conversion
         processed_formula = _add_function_prefixes(processed_formula)
         
-        # 5. Special notation conversion
+        # 6. Special notation conversion
         processed_formula = _convert_tro_notations(processed_formula)
         
-        # 6. Restore string literals
+        # 7. Restore array literals
+        processed_formula = _restore_array_literals(processed_formula, array_map)
+        
+        # 8. Restore string literals
         final_formula = _restore_string_literals(processed_formula, string_map)
         
-        # 7. Attribute setting
+        # 9. Attribute setting
         attributes = _determine_formula_attributes(final_formula, cell)
         
         # Return with '=' prefix
@@ -94,6 +100,48 @@ def _restore_string_literals(formula: str, string_map: Dict[str, str]) -> str:
     """
     result = formula
     for placeholder, original in string_map.items():
+        result = result.replace(placeholder, original)
+    return result
+
+def _protect_array_literals(formula: str) -> Tuple[str, Dict[str, str]]:
+    """
+    Temporarily replace array literals with placeholders
+    Array literals are not nested, so we can use a simpler approach
+    
+    Args:
+        formula: Formula string to process
+    
+    Returns:
+        (Formula with placeholders, mapping of placeholders to original arrays)
+    """
+    array_map = {}
+    
+    def replace_array(match):
+        # Generate unique placeholder
+        placeholder = f"__ARR_{uuid.uuid4().hex[:8]}__"
+        array_map[placeholder] = match.group(0)
+        return placeholder
+    
+    # Replace array literals (no nesting, so simple regex works)
+    # Match { followed by any characters except { or } and then }
+    protected = re.sub(r'\{[^{}]*\}', replace_array, formula)
+    
+    return protected, array_map
+
+
+def _restore_array_literals(formula: str, array_map: Dict[str, str]) -> str:
+    """
+    Restore placeholders to original array literals
+    
+    Args:
+        formula: Formula with placeholders
+        array_map: Mapping of placeholders to original arrays
+    
+    Returns:
+        Formula with restored array literals
+    """
+    result = formula
+    for placeholder, original in array_map.items():
         result = result.replace(placeholder, original)
     return result
 
@@ -350,7 +398,6 @@ def _parse_let_content(formula: str) -> Tuple[List[Tuple[str, str]], str, int]:
     """
     var_pairs = []
     paren_depth = 0
-    brace_depth = 0
     current = []
     i = 0
     args = []
@@ -372,15 +419,9 @@ def _parse_let_content(formula: str) -> Tuple[List[Tuple[str, str]], str, int]:
             else:
                 paren_depth -= 1
                 current.append(char)
-        #TODO: { }は、処理には影響はしないはず。文字列のように、ここだけ別処理で除外しても良いかもしれない
-        elif char == '{':
-            brace_depth += 1
-            current.append(char)
-        elif char == '}':
-            brace_depth -= 1
-            current.append(char)
-        elif char == ',' and paren_depth == 0 and brace_depth == 0:
-            # Argument separator (only when not inside parentheses or braces)
+
+        elif char == ',' and paren_depth == 0:
+            # Argument separator (only when not inside parentheses)
             if current:
                 args.append(''.join(current).strip())
             current = []
