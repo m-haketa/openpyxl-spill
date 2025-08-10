@@ -192,6 +192,9 @@ class WorkSheetParser:
         style_id = element.get('s', 0)
         if style_id:
             style_id = int(style_id)
+        
+        # cm属性の取得（スピル数式の判定用）
+        cm = element.get('cm')
 
         if data_type == "inlineStr":
             value = None
@@ -241,7 +244,7 @@ class WorkSheetParser:
                     else:
                         value = Text.from_tree(child).content
 
-        return {'row':row, 'column':column, 'value':value, 'data_type':data_type, 'style_id':style_id}
+        return {'row':row, 'column':column, 'value':value, 'data_type':data_type, 'style_id':style_id, 'cm':cm}
 
 
     def parse_formula(self, element):
@@ -371,6 +374,14 @@ class WorksheetReader:
                 c = Cell(self.ws, row=cell['row'], column=cell['column'], style_array=style)
                 c._value = cell['value']
                 c.data_type = cell['data_type']
+                
+                # cm="1"属性がある場合、_is_spillフラグを設定（書き込み時の処理の逆）
+                # これはエクセルファイル書き込み時の処理の裏返し:
+                # 書き込み時: _is_spill=True → cm="1"を出力
+                # 読み込み時: cm="1"が存在 → _is_spill=True
+                if cell.get('cm') == '1':
+                    c._is_spill = True
+                    
                 self.ws._cells[(cell['row'], cell['column'])] = c
 
         if self.ws._cells:
