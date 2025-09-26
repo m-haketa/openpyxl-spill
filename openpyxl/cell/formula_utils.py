@@ -45,14 +45,17 @@ def prepare_spill_formula(formula: str, cell: Any) -> Tuple[str, Dict[str, Any]]
         
         # 6. Special notation conversion
         processed_formula = _convert_tro_notations(processed_formula)
-        
-        # 7. Restore array literals
+
+        # 7. Convert spill range shorthand (#) to ANCHORARRAY calls
+        processed_formula = _convert_spill_references(processed_formula)
+
+        # 8. Restore array literals
         processed_formula = _restore_array_literals(processed_formula, array_map)
-        
-        # 8. Restore string literals
+
+        # 9. Restore string literals
         final_formula = _restore_string_literals(processed_formula, string_map)
-        
-        # 9. Attribute setting
+
+        # 10. Attribute setting
         attributes = _determine_formula_attributes(final_formula, cell)
         
         # Return with '=' prefix
@@ -666,7 +669,8 @@ def _get_new_function_list() -> Dict[str, str]:
         'LET': '_xlfn.',
         'GROUPBY': '_xlfn.',
         'PIVOTBY': '_xlfn.',
-        
+        'CONCAT': '_xlfn.',
+
         # Special double prefix (add _xlfn._xlws.)
         'SORT': '_xlfn._xlws.',
         'FILTER': '_xlfn._xlws.',
@@ -702,6 +706,21 @@ def _convert_tro_notations(formula: str) -> str:
     result = re.sub(pattern_leading, lambda m: _convert_tro_match(m, '_xlfn._TRO_LEADING'), result)
     
     return result
+
+
+def _convert_spill_references(formula: str) -> str:
+    """Convert spill suffix references (e.g. A1#) to ANCHORARRAY calls."""
+
+    pattern = re.compile(
+        r"(?P<sheet>(?:'[^']+'!|[A-Za-z_][\\w\.]*!)?)(?P<ref>\$?[A-Z]{1,3}\$?\d+|[A-Za-z_][\\w\.]*?)#"
+    )
+
+    def repl(match: re.Match) -> str:
+        sheet = match.group('sheet') or ''
+        ref = match.group('ref')
+        return f"_xlfn.ANCHORARRAY({sheet}{ref})"
+
+    return pattern.sub(repl, formula)
 
 
 def _convert_tro_match(match: re.Match, func_name: str) -> str:
